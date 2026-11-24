@@ -29,7 +29,7 @@ BACKEND_URL=http://localhost:8080 npm run dev     # 백엔드를 먼저 띄운�
 
 | 키 | 설명 |
 | --- | --- |
-| `BACKEND_URL` | 백엔드 주소. 빌드 때 들어가므로 바꾸면 재배포 |
+| `BACKEND_URL` | 백엔드 주소. 빌드 때 들어가므로 바꾸면 재배포. **배포용 빌드는 이 값이 없으면 실패한다** (주소 없이 배포되면 API 가 전부 죽으므로). 개발 서버는 없으면 `http://localhost:8080` |
 | `NEXT_PUBLIC_FLIGHT_PREFIX` / `NEXT_PUBLIC_EVENT_NAME` / `NEXT_PUBLIC_EVENT_DAYS` | 편명 접두사 · 보드 상단 행사명 · 행사일 |
 | `NEXT_PUBLIC_TP_WEB_URL` 등 링크 4종 | 완료 화면 링크 버튼 (비우면 숨김) |
 | `NEXT_PUBLIC_DONE_PREVIEW` | `1` 이면 완료 화면 아래 미리보기 버튼 (테스트용) |
