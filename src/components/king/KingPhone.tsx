@@ -29,7 +29,7 @@ function Name({ text }: { text: string }) {
  * 손님이 누르는 것은 [등록하기]와 [결과 보기] 두 번. 추첨은 직원 화면에서 넘긴다.
  */
 export default function KingPhone() {
-  const { guest, step, state, seq, advance } = useKing("phone");
+  const { guest, step, state, seq, advance, told } = useKing("phone");
   const [stamping, setStamping] = useState(false);
   const [revealing, setRevealing] = useState(false);
   const [localAt, setLocalAt] = useState<string | null>(null);
@@ -55,10 +55,16 @@ export default function KingPhone() {
   // 결과가 나온 순간 진동으로 알린다 (실제 화면과 같다)
   const prev = useRef(step);
   useEffect(() => {
-    if (prev.current < 2 && step === 2) { try { navigator.vibrate?.([200, 100, 200]); } catch {} }
     if (step === 0 && prev.current !== 0) { setRevealing(false); setStamping(false); setLocalAt(null); }
     prev.current = step;
   }, [step]);
+  // 전광판 발표가 끝난 순간에 진동. 이미 발표된 상태로 화면을 열었을 때는 울리지 않는다
+  const waited = useRef(false);
+  useEffect(() => {
+    if (step < 2) { waited.current = false; return; }
+    if (!told) { waited.current = true; return; }
+    if (waited.current) { waited.current = false; try { navigator.vibrate?.([200, 100, 200]); } catch {} }
+  }, [step, told]);
 
   if (!guest) return <div className="card"><p className="lead" style={{ margin: 0 }}>준비 중이에요</p></div>;
 
@@ -111,7 +117,8 @@ export default function KingPhone() {
     </div>
   );
 
-  if (step === 1) return (
+  // 추첨을 눌렀어도 전광판이 발표를 마칠 때까지는 결과를 띄우지 않는다
+  if (step === 1 || (step === 2 && !told)) return (
     <>
       {logo}
       <div className={`${s.board} ${s.rise}`}>
@@ -121,8 +128,8 @@ export default function KingPhone() {
       </div>
       <div className={`card ${s.hero} ${s.rise} ${s.underBoard}`}>
         <p className={s.raffleNo}>{h.raffleNo}<b>{seq4}</b></p>
-        <h1 className={s.h}>곧 추첨이 시작돼요</h1>
-        <p className={s.sub}>결과가 나오면 여기에 바로 알려드려요</p>
+        <h1 className={s.h}>{step === 1 ? "곧 추첨이 시작돼요" : "지금 추첨하고 있어요"}</h1>
+        <p className={s.sub}>{step === 1 ? "결과가 나오면 여기에 바로 알려드려요" : "전광판을 봐 주세요"}</p>
       </div>
     </>
   );

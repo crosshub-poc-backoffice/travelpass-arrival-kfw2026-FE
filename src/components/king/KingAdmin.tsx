@@ -9,7 +9,7 @@ import k from "./king.module.css";
 import KingName from "./KingName";
 import { useKing } from "./useKing";
 
-const STEP_LABEL = ["대기 중", "등록됨 · 전광판에 떠 있음", "추첨됨 · 결과 보기 대기", "결과 확인함"];
+const STEP_LABEL = ["대기 중", "등록됨 · 전광판에 떠 있음", "발표됨 · 결과 보기 대기", "결과 확인함"];
 /** 이 시간 안에 상태를 물어봤으면 연결된 것으로 본다 */
 const ALIVE_MS = 5000;
 
@@ -18,7 +18,7 @@ const ALIVE_MS = 5000;
  * 실제 운영 콘솔(/admin)과는 별개라 여기서 누르는 것은 실제 추첨·DB 에 아무 영향이 없다.
  */
 export default function KingAdmin() {
-  const { state, guest, step, epoch, online, advance, send } = useKing("admin");
+  const { state, guest, step, epoch, online, advance, send, landed } = useKing("admin");
   const [name, setName] = useState("");
   const [origin, setOrigin] = useState("SEOUL");
   const [rank, setRank] = useState<Rank>(2);
@@ -47,13 +47,13 @@ export default function KingAdmin() {
     try { await send({ action: "reset" }); setMsg("초기화했어요"); } catch { setMsg("초기화하지 못했어요. 연결을 확인해 주세요"); }
   }
 
-  const fx = state?.fx ?? KING_FX;
+  const fx = { ...KING_FX, ...state?.fx };
   /** 연출 선택은 누르는 즉시 저장한다 */
   async function toggle(key: keyof KingFx) {
     setMsg("");
     try { await send({ action: "fx", fx: { ...fx, [key]: !fx[key] } }); } catch { setMsg("바꾸지 못했어요. 연결을 확인해 주세요"); }
   }
-  const FX_ROWS: [keyof KingFx, string][] = [["solo", "발표할 때 손님만 보여주기"], ["confetti", "꽃가루"], ["sound", "당첨 효과음"]];
+  const FX_ROWS: [keyof KingFx, string][] = [["highlight", "손님 줄 강조"], ["confetti", "꽃가루"], ["sound", "당첨 효과음"]];
 
   const alive = (at: number | null | undefined) => !!state && !!at && state.now - at < ALIVE_MS;
   const boardOn = online && alive(state?.beats.board);
@@ -64,7 +64,7 @@ export default function KingAdmin() {
       <h1 className={k.title}>시연 진행</h1>
 
       <div className="card">
-        <p className={k.now}>{STEP_LABEL[step]}</p>
+        <p className={k.now}>{step === 2 && !landed ? "추첨 중 · 곧 발표" : STEP_LABEL[step]}</p>
         <div className={k.status} style={{ marginTop: 14 }}>
           <div><span>서버</span><span className={online ? k.ok : k.bad}>{online ? "연결됨" : "끊김"}</span></div>
           <div><span>전광판</span><span className={boardOn ? k.ok : k.bad}>{boardOn ? "연결됨" : "안 보임"}</span></div>
@@ -109,7 +109,7 @@ export default function KingAdmin() {
         </div>
         <button type="button" className="btn ghost" onClick={save}>손님 정보 저장</button>
         {msg && <p className={k.note} style={{ marginTop: 10 }} role="status">{msg}</p>}
-        <p className={k.note} style={{ marginTop: 10 }}>회차 {epoch ? String(epoch).slice(-4) : "-"} · 여기서 누르는 것은 실제 추첨과 무관해요</p>
+        <p className={k.note} style={{ marginTop: 10 }}>회차 {epoch ? String(epoch).slice(-4) : "-"} · 전광판의 다른 승객·당첨자는 모두 가짜고, 실제 추첨과 무관해요</p>
       </div>
     </div>
   );
