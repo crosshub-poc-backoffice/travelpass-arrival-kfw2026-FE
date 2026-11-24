@@ -42,9 +42,10 @@ async function run(cmds: Cmd[]): Promise<(string | null)[]> {
 
 type Stored = Pick<KingState, "epoch" | "step" | "guest" | "fx" | "at">;
 
-/** 저장소가 비어 있을 때 쓸 기본 손님 (환경변수 KING_NAME · KING_ORIGIN · KING_RANK). 이름은 코드에 두지 않는다 */
+/** 저장소가 비어 있을 때 쓸 기본 손님. 환경변수 KING_NAME · KING_ORIGIN · KING_RANK 로 바꿀 수 있다 */
+const DEFAULT_NAME = "LEE EOGWEON✨";
 function defaultGuest(): KingGuest | null {
-  const name = normalizeName(process.env.KING_NAME ?? "");
+  const name = normalizeName(process.env.KING_NAME || DEFAULT_NAME);
   if (name.length < 2) return null;
   const rank = Number(process.env.KING_RANK ?? 2);
   return { name, origin: normalizeText(process.env.KING_ORIGIN ?? "SEOUL").slice(0, FROM_WIDTH) || "SEOUL", rank: ([1, 2, 3].includes(rank) ? rank : 2) as KingGuest["rank"], seq: 1 };
