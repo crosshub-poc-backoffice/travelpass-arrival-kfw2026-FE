@@ -1,0 +1,1266 @@
+openapi: 3.1.0
+info:
+  title: TravelPass Arrival API
+  version: 1.0.0
+  description: |
+    코리아 핀테크 위크 2026 부스 앱(등록 · 전광판 · 추첨 · 경품 수령)의 프론트 ↔ 백엔드 계약.
+    프론트(Next.js)는 화면만 가지고, 이 문서의 모든 경로는 백엔드가 구현한다.
+
+    ## 연결 방식
+    브라우저는 항상 프론트와 같은 출처의 `/api/*`, `/go/*` 를 부른다. 프론트 서버가 이 경로를 백엔드로 그대로 넘긴다(프록시).
+    그래서 쿠키는 전부 프론트 도메인의 1st-party 쿠키이고 CORS 는 쓰지 않는다.
+    프록시가 한 단 더 생기므로 백엔드의 `TRUSTED_PROXY_HOPS` 는 "프론트 앞단 프록시 수 + 1" 로 둔다.
+
+    ## 쿠키
+    | 이름 | 누가 심나 | 내용 | 속성 |
+    | --- | --- | --- | --- |
+    | `tp_dev` | 프론트(페이지 요청 시), 백엔드(`/go/*` 에 쿠키 없이 왔을 때) | 기기 식별용 무작위 값 `[A-Za-z0-9_-]{16,64}`. 요청 제한·처리 기록에 쓴다. 개인정보 없음 | HttpOnly, SameSite=Lax, 90일 |
+    | `tp_pass` | 백엔드(등록·번호 찾기 성공 시) | 보딩패스 = `participants.access_token`. 응답 본문·주소에는 절대 싣지 않는다 | HttpOnly, SameSite=Lax, 90일 |
+    | `tp_console` | 백엔드(콘솔 로그인) | `만료초.base64url(이름).서명` (HMAC-SHA256) | HttpOnly, SameSite=Lax, 1일 |
+
+    운영(HTTPS)에서는 세 쿠키 모두 `Secure` 를 붙인다.
+
+    ## 오류 형식
+    2xx 가 아니면 본문은 항상 `Error` 스키마다. `error` 는 화면에 그대로 띄우는 한국어 문구, `code` 는 프론트가 분기하는 값.
+    | 상태 | code | 뜻 |
+    | --- | --- | --- |
+    | 400 | 엔드포인트별 | 입력값 오류. `field` 가 있으면 그 입력 칸 |
+    | 401 | (없음) / `NO_PASS` | 콘솔 로그인 필요 / 보딩패스 없음 |
+    | 409 | `DUPLICATE`, `ALREADY_CLAIMED`, `SURVEY_CLOSED` | 충돌 |
+    | 429 | `RATE_LIMITED` | 요청 제한. `Retry-After: 2` |
+    | 503 | `BUSY` | 혼잡(락 대기·쿼리 시간 초과·풀 고갈). `retryable: true`, `Retry-After: 2`. 같은 멱등키로 재시도하면 된다 |
+    | 503 | `UNAVAILABLE` | DB 연결 불가. `retryable: true`, `Retry-After: 2` |
+    | 503 | `REGISTRATION_PAUSED` | 콘솔에서 등록을 멈춤 |
+    | 500 | `SERVER` | 그 밖의 서버 오류 |
+
+    ## 공통 규칙
+    - 시각은 모두 ISO 8601 UTC 문자열(`2026-11-25T04:00:00.000Z`). 마감·기한 비교는 DB 시계로 한다.
+    - 필드 이름은 DB 행을 그대로 내려주는 것은 snake_case, 그 밖은 camelCase 다(기존 화면 호환). 바꾸지 않는다.
+    - 따로 적지 않은 응답은 `Cache-Control: no-store`.
+    - 요청 제한은 1분 고정 윈도우, "기기(`tp_dev`)당 / IP 전체" 두 상한을 같이 본다. 각 경로의 `x-rate-limit` 참고.
+      쿠키 없는 요청은 IP 하나를 기기 하나로 센다.
+    - 콘솔(`/api/admin/*`)은 전부 `tp_console` 쿠키가 필요하고, 처리 내용은 이름 + 기기 + IP + User-Agent 와 함께 `audit_logs` 에 남는다.
+    - 공개 조회는 서버가 1~3초 캐시하고, DB 가 실패하면 60초 이내의 마지막 값을 `stale: true` 로 내려준다.
+servers:
+  - url: /
+    description: 프론트와 같은 출처 (프론트가 백엔드로 프록시)
+tags:
+  - name: 방문객
+  - name: 전광판·발표
+  - name: 콘솔 로그인
+  - name: 콘솔
+  - name: 운영
+
+paths:
+  /api/register:
+    post:
+      tags: [방문객]
+      summary: 등록 (참여번호 발급)
+      description: |
+        번호 발급과 저장은 한 트랜잭션 + advisory lock(1001). 번호는 행사 전체에서 1부터 연속이고 번호 순서 = 등록 시각 순서.
+        멱등: 같은 `Idempotency-Key` 로 다시 오면 새 번호 없이 처음 결과를 `200` + `replayed: true` 로 돌려준다
+        (키는 같은데 휴대폰·이메일이 다르면 `422 IDEMPOTENCY_MISMATCH`).
+        성공하면 `tp_pass` 쿠키를 심고, 서버가 `register_done` 이벤트를 남긴다.
+      x-rate-limit: { device: 20, ip: 3000 }
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, pattern: "^[A-Za-z0-9_-]{8,64}$" }
+          description: 없으면 본문의 `requestId` 를 쓴다
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+      responses:
+        "201":
+          description: 새로 등록됨
+          headers: { Set-Cookie: { schema: { type: string }, description: tp_pass } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "200":
+          description: 같은 멱등키의 재전송 (replayed = true)
+          headers: { Set-Cookie: { schema: { type: string }, description: tp_pass } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegisterResponse" }
+        "400":
+          description: |
+            입력 오류. `field` + `code`:
+            `displayName`(NAME_TOO_SHORT · NAME_TOO_LONG · NAME_BLOCKED), `origin`(ORIGIN_REQUIRED · ORIGIN_TEXT_INVALID · ORIGIN_BLOCKED),
+            `phone`(PHONE_INVALID), `email`(EMAIL_INVALID), `consentPrivacy`(CONSENT_PRIVACY_REQUIRED), `consentDisplay`(CONSENT_DISPLAY_REQUIRED),
+            멱등키 형식 오류는 BAD_REQUEST_ID
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: 휴대폰 또는 이메일이 이미 등록됨. `code: DUPLICATE`, `field: phone | email`
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422":
+          description: "`IDEMPOTENCY_MISMATCH`"
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/precheck:
+    post:
+      tags: [방문객]
+      summary: 위저드 중간 중복 확인
+      description: |
+        휴대폰·이메일 단계에서 중복을 먼저 알려준다. 번호는 발급하지 않고, 형식이 틀린 값은 판단하지 않는다(최종 판단은 `/api/register`).
+        `tp_dev` 쿠키가 없으면 조회하지 않고 `duplicate: null` 을 준다(남의 번호 조회 방지).
+      x-rate-limit: { device: 10, ip: 6000, extra: "10분에 기기당 30 / IP 20000" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone: { type: string }
+                phoneCountry: { type: string, description: ISO 국가 코드 (KR 등) }
+                email: { type: string }
+      responses:
+        "200":
+          description: 확인 결과
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [duplicate]
+                properties:
+                  duplicate: { type: [string, "null"], enum: [phone, email, null] }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/lookup:
+    post:
+      tags: [방문객]
+      summary: 다른 기기에서 내 번호 찾기
+      description: 휴대폰 + 이메일이 둘 다 일치해야 한다. 성공하면 이 브라우저에 `tp_pass` 를 심고 `register_done`(via lookup) 을 남긴다.
+      x-rate-limit: { device: 10, ip: 1500 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, email]
+              properties:
+                phone: { type: string }
+                phoneCountry: { type: string }
+                email: { type: string }
+      responses:
+        "200":
+          description: 찾음
+          headers: { Set-Cookie: { schema: { type: string }, description: tp_pass } }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participant]
+                properties:
+                  participant: { $ref: "#/components/schemas/PublicParticipant" }
+        "400": { description: "`LOOKUP_INVALID`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: "`LOOKUP_NOT_FOUND`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/me:
+    get:
+      tags: [방문객]
+      summary: 내 완료 화면 데이터
+      description: |
+        `tp_pass` 쿠키로 본인을 찾는다. 쿠키가 없거나(첫 방문) DB 에 없는 토큰이면 오류가 아니라 `{ participant: null }` 이고,
+        DB 에 없는 토큰이면 쿠키도 지운다(다시 등록할 수 있게).
+      responses:
+        "200":
+          description: 완료 화면 데이터, 또는 `{ participant: null }`
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [participant]
+                    properties: { participant: { type: "null" } }
+                  - $ref: "#/components/schemas/Me"
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/status:
+    get:
+      tags: [방문객]
+      summary: 변경 감지 (가벼운 폴링)
+      description: |
+        완료 화면이 이것만 자주 묻고, `drawVersion` 이 바뀌었을 때만 `/api/me` 를 다시 부른다.
+        값 = `추첨된 회차 수:마지막 추첨 시각(ms):공지 시각(ms)`. 프론트는 문자열이 같은지만 본다. 서버 2초 캐시.
+      responses:
+        "200":
+          description: 현재 버전
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [drawVersion, stale]
+                properties:
+                  drawVersion: { type: string, examples: ["2:1795586400000:0"] }
+                  stale: { type: boolean }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/survey:
+    post:
+      tags: [방문객]
+      summary: 추가 질문 답 하나 저장
+      description: |
+        본인 확인은 `tp_pass`. 같은 문항을 다시 보내면 덮어쓴다. 7문항이 모두 차면 완료(추첨 표 2장).
+        받는 조건: 아직 추첨되지 않았고, 속할 회차가 있고, 추첨 시각 전. 처음 시작이라면 추첨 2분 전까지.
+        추첨과는 advisory lock(1002, 설문 shared / 추첨 exclusive)으로 섞이지 않게 한다.
+      x-rate-limit: { device: 60, ip: 6000 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [q, choice]
+              properties:
+                q: { type: integer, minimum: 1, maximum: 7 }
+                choice: { type: integer, minimum: 1, maximum: 4 }
+                pos: { type: [integer, "null"], minimum: 1, maximum: 4, description: 화면에서 그 보기가 놓였던 자리 }
+                ms: { type: [integer, "null"], description: "답하는 데 걸린 시간(ms). 0~3,600,000 으로 자른다" }
+      responses:
+        "200":
+          description: 저장됨
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [answered, done]
+                properties:
+                  answered: { type: integer }
+                  done: { type: boolean }
+        "400": { description: "`SURVEY_INVALID`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: "`NO_PASS`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`SURVEY_CLOSED`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/events:
+    post:
+      tags: [방문객]
+      summary: 브라우저 행동 이벤트 수집
+      description: |
+        한 번에 최대 20건. 허용 이름은 `page_view`, `result_seen`, `register_error`, `step_view` 뿐이고 그 밖은 조용히 버린다.
+        누구인지는 서버가 쿠키(`tp_pass`, `tp_dev`)로 정한다. 저장은 응답 뒤에 하고 실패하면 버린다(항상 202).
+        발생 시각 = DB 시계 − (`ago` + 서버 대기 시간). `ago` 는 최대 60초까지만 믿는다.
+        허용 props: page_view `{ raffle: waiting|won|lost, resume: true }`, result_seen `{ rank: 1|2|3 }`,
+        register_error `{ code, stage: precheck|submit|lookup }` (모르는 code 는 OTHER), step_view `{ step: quiz|origin|phone|email|name|consent }`.
+      x-rate-limit: { device: 60, ip: 20000 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                events:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name: { type: string, enum: [page_view, result_seen, register_error, step_view] }
+                      page: { type: string, enum: [register, done, results, console] }
+                      props: { type: object }
+                      ago: { type: number, description: 보내기 전 브라우저에서 기다린 ms }
+      responses:
+        "202":
+          description: 받음
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { accepted: { type: integer } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /go/{target}:
+    get:
+      tags: [방문객]
+      summary: 외부 링크 클릭 기록 후 이동
+      description: |
+        허용 목록의 주소로만 302 이동한다(`utm_source=kfw2026`, `utm_medium=booth` 를 붙임). 주소가 설정되지 않은 target 은 404.
+        `outbound_click` 이벤트를 남긴다. 요청 제한을 넘으면 이동은 그대로 하고 기록만 안 한다.
+        `tp_dev` 쿠키가 없으면 여기서 만들어 심는다.
+      x-rate-limit: { device: 30, ip: 3000 }
+      parameters:
+        - name: target
+          in: path
+          required: true
+          schema: { type: string, enum: [tp-web, app-ios, app-android, crosshub] }
+      responses:
+        "302": { description: 이동, headers: { Location: { schema: { type: string } } } }
+        "404": { description: 모르는 target (본문은 text/plain) }
+
+  /api/board:
+    get:
+      tags: [전광판·발표]
+      summary: TV 전광판 데이터
+      description: |
+        숨김 처리된 참가자는 빠지고 개인정보는 없다. TV 가 2초마다 폴링한다. 서버 1초 캐시.
+        `pin` 은 보드 모드: 추첨 직후 10분은 그 회차 당첨자 화면(`winners`), 그 밖에는 다음 추첨 안내(`next`).
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 9 } }
+      responses:
+        "200":
+          description: 보드
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, total, pin, stale, serverTime]
+                properties:
+                  rows: { type: array, items: { $ref: "#/components/schemas/PublicParticipant" }, description: 최신이 맨 앞 }
+                  total: { type: integer, description: 지금까지 발급된 가장 큰 참여번호 }
+                  pin: { $ref: "#/components/schemas/BoardPin" }
+                  stale: { type: boolean }
+                  serverTime: { type: string, format: date-time }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/results:
+    get:
+      tags: [전광판·발표]
+      summary: 당첨 발표
+      description: 추첨이 끝난 회차와 1~3등 번호. 서버 3초 캐시, 응답은 `Cache-Control: public, max-age=2`.
+      responses:
+        "200":
+          description: 발표
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rounds, next, prizes, stale]
+                properties:
+                  rounds:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        drawn_at: { type: string, format: date-time }
+                        eligible_from_seq: { type: integer }
+                        eligible_to_seq: { type: integer }
+                        eligible_count: { type: integer }
+                        winners: { type: array, items: { $ref: "#/components/schemas/Winner" } }
+                  next:
+                    type: [object, "null"]
+                    properties:
+                      name: { type: string }
+                      cutoff_at: { type: string, format: date-time }
+                  prizes: { $ref: "#/components/schemas/Prizes" }
+                  stale: { type: boolean }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /api/check:
+    get:
+      tags: [전광판·발표]
+      summary: 참여번호로 당첨 여부 확인
+      description: 번호가 1부터 차례라 표시 이름은 내려주지 않는다. 번호별 서버 3초 캐시. `result_check` 이벤트를 남긴다.
+      x-rate-limit: { device: 30, ip: 6000 }
+      parameters:
+        - { name: seq, in: query, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        "200":
+          description: 그 번호의 추첨 상태 (display_name 제외)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RaffleStatus" }
+        "400": { description: "`SEQ_REQUIRED`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: "`SEQ_NOT_FOUND`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /api/auth/login:
+    post:
+      tags: [콘솔 로그인]
+      summary: 콘솔 로그인
+      description: 공용 비밀번호(`ADMIN_KEY`) + 본인 이름. 모두 같은 권한. 성공하면 `tp_console` 쿠키(1일)와 `login` 기록.
+      x-rate-limit: { device: 10, ip: 60 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, key]
+              properties:
+                name: { type: string, description: "1~20자. 공백은 하나로 줄이고 `()<>\"'`\\` 는 쓸 수 없다" }
+                key: { type: string }
+      responses:
+        "200":
+          description: 로그인됨
+          headers: { Set-Cookie: { schema: { type: string }, description: tp_console } }
+          content:
+            application/json:
+              schema: { type: object, properties: { name: { type: string } } }
+        "400": { description: "이름 오류 (`field: name`)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: 비밀번호 불일치, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/auth/logout:
+    post:
+      tags: [콘솔 로그인]
+      summary: 로그아웃 (쿠키 삭제)
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } }
+  /api/auth/me:
+    get:
+      tags: [콘솔 로그인]
+      summary: 로그인 상태
+      responses:
+        "200":
+          description: 상태 (로그인 안 됐어도 200)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loggedIn, name, allowReset]
+                properties:
+                  loggedIn: { type: boolean }
+                  name: { type: [string, "null"] }
+                  allowReset: { type: boolean, description: "서버 `ALLOW_RESET=1` 여부 (전체 초기화 버튼 노출)" }
+
+  /api/admin/claims:
+    get:
+      tags: [콘솔]
+      summary: 수령 화면 조회 (번호 또는 수령 QR)
+      description: |
+        `qr` 이 있으면 토큰에서 참여번호를 꺼낸다. 수령 QR 토큰 = `seq.만료초.서명22자`, 수명 90초.
+        직원이 조회한 시각을 `claim_lookup` 이벤트로 남긴다.
+      security: [{ console: [] }]
+      parameters:
+        - { name: seq, in: query, schema: { type: integer } }
+        - { name: qr, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: 참가자 + 추첨 상태 + 수령 내역 + 이력
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [participant, raffle, claims, logs, viaQr]
+                properties:
+                  participant: { $ref: "#/components/schemas/AdminParticipantBase" }
+                  raffle: { $ref: "#/components/schemas/RaffleStatus" }
+                  claims: { type: array, items: { $ref: "#/components/schemas/Claim" } }
+                  logs:
+                    type: array
+                    description: 이 참가자의 claim · unclaim · hide · unhide 기록, 최신순 최대 50
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        actor: { type: string }
+                        action: { type: string }
+                        detail: { type: [object, "null"] }
+                        device_id: { type: [string, "null"] }
+                        created_at: { type: string, format: date-time }
+                  viaQr: { type: boolean }
+        "400": { description: "번호 없음 / 위조 QR / 만료 QR(`QR_EXPIRED`)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 그 번호의 참가자 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    post:
+      tags: [콘솔]
+      summary: 지급 완료 처리
+      description: |
+        마스크팩은 그 참가자의 추첨 발표 뒤에만(`NOT_DRAWN`). 등수 경품은 실제 당첨 등수와 같아야 하고 수령 기한이 지나면 `410 CLAIM_EXPIRED`.
+        같은 경품을 두 번 처리하면 `409 ALREADY_CLAIMED` + `existing`(기존 수령 내역). 동시 요청도 DB 유니크 제약으로 한 건만.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClaimRequest" } } }
+      responses:
+        "201":
+          description: 수령 기록
+          content: { application/json: { schema: { type: object, properties: { claim: { $ref: "#/components/schemas/Claim" } } } } }
+        "400": { description: 경품 종류 오류 · 당첨 등수 불일치 · `NOT_DRAWN`, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 참가자 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: "`ALREADY_CLAIMED` + `existing`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "410": { description: "`CLAIM_EXPIRED`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      tags: [콘솔]
+      summary: 수령 되돌리기
+      description: 지운 내역은 `unclaim` 기록에 남는다.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClaimRequest" } } }
+      responses:
+        "200":
+          description: 지워진 수령 기록
+          content: { application/json: { schema: { type: object, properties: { removed: { $ref: "#/components/schemas/Claim" } } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 수령 내역 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/admin/inventory:
+    get:
+      tags: [콘솔]
+      summary: 경품 재고 + 최근 수령인
+      security: [{ console: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 }, description: 최근 수령인 수 }
+      responses:
+        "200":
+          description: 재고
+          content: { application/json: { schema: { $ref: "#/components/schemas/Inventory" } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/participants:
+    get:
+      tags: [콘솔]
+      summary: 참가자 검색
+      description: |
+        `q` 해석: 숫자 5자리 이하 → 참여번호 일치 / `+`·숫자·공백·`-` 4자 이상 → 휴대폰 부분 일치(맨 앞 0 은 뗀다) /
+        `@` 포함 → 이메일 부분 일치 / 그 밖 → 표시명 부분 일치(대문자로). 비면 전체. 참여번호 내림차순.
+      security: [{ console: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        "200":
+          description: 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, total]
+                properties:
+                  rows: { type: array, items: { $ref: "#/components/schemas/AdminParticipant" } }
+                  total: { type: integer }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+    post:
+      tags: [콘솔]
+      summary: 종이 등록 입력
+      description: |
+        장애 때 종이로 받은 참가자를 복구 후 입력한다(`source = paper`, 언어 ko, 필수 동의는 종이에서 받은 것으로 본다).
+        등록 일시 중단 중에도 받는다. 검증·중복·멱등 규칙은 `/api/register` 와 같다. `register.paper` 기록.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName, origin, phone, email, paperConsent]
+              properties:
+                displayName: { type: string }
+                origin: { type: string }
+                originText: { type: [string, "null"] }
+                phone: { type: string }
+                phoneCountry: { type: string }
+                email: { type: string }
+                consentMarketing: { type: boolean }
+                paperConsent: { type: boolean, const: true }
+                requestId: { type: string }
+      responses:
+        "201": { description: 등록됨, content: { application/json: { schema: { $ref: "#/components/schemas/RegisterResponse" } } } }
+        "200": { description: 재전송, content: { application/json: { schema: { $ref: "#/components/schemas/RegisterResponse" } } } }
+        "400": { description: "입력 오류 (`field: paperConsent` 포함)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "409": { description: "`DUPLICATE`", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/admin/participants/{id}:
+    patch:
+      tags: [콘솔]
+      summary: 전광판 숨김 / 해제
+      description: TV 에서만 빠지고 참여·추첨 자격은 그대로. `hide` / `unhide` 기록.
+      security: [{ console: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer }, description: participants.id (참여번호 아님) }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hidden]
+              properties:
+                hidden: { type: boolean }
+                reason: { type: string, maxLength: 200 }
+      responses:
+        "200":
+          description: 바뀐 참가자
+          content: { application/json: { schema: { type: object, properties: { participant: { $ref: "#/components/schemas/AdminParticipantBase" } } } } }
+        "400": { description: hidden 누락, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 참가자 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/admin/export:
+    get:
+      tags: [콘솔]
+      summary: 참가자 CSV
+      description: |
+        UTF-8 BOM, 참여번호 오름차순. 파일명 `travelpass-arrival-YYYY-MM-DD.csv`. `export` 기록.
+        열: seq, display_name, origin_code, origin_group, phone, email, created_at, consent_version, consent_privacy_at, consent_display_at,
+        consent_marketing, consent_marketing_at, hidden, round, rank, mask_claimed_at, mask_claimed_by, prize_claimed_at, prize_claimed_by, lang, source
+      security: [{ console: [] }]
+      responses:
+        "200": { description: CSV, content: { text/csv: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+  /api/admin/analytics/export:
+    get:
+      tags: [콘솔]
+      summary: 상세 분석 엑셀
+      description: |
+        누를 때만 계산(같은 시점 스냅샷, REPEATABLE READ READ ONLY). 동시에 눌러도 계산은 한 번, 결과는 30초 재사용.
+        파일명 `travelpass-analytics-YYYY-MM-DD.xlsx` (KST). `analytics_export` 기록.
+      security: [{ console: [] }]
+      responses:
+        "200": { description: xlsx, content: { application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+  /api/admin/analytics/summary:
+    get:
+      tags: [콘솔]
+      summary: 보고용 요약 엑셀
+      description: 2장(결과 요약 · 다음 부스 준비표). 파일명 `travelpass-report-YYYY-MM-DD.xlsx`. `analytics_summary_export` 기록.
+      security: [{ console: [] }]
+      responses:
+        "200": { description: xlsx, content: { application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/rounds:
+    get:
+      tags: [콘솔]
+      summary: 추첨 회차 목록
+      description: 마감 시각순. 추첨된 회차는 당첨 번호 포함. `allocated` 는 등수별로 이미 묶인 수량(추첨 전 배정 + 기한 안 지난 당첨).
+      security: [{ console: [] }]
+      responses:
+        "200":
+          description: 회차
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rounds, prizes, allocated]
+                properties:
+                  rounds:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Round"
+                        - type: object
+                          properties: { winners: { type: array, items: { $ref: "#/components/schemas/Winner" } } }
+                  prizes: { $ref: "#/components/schemas/Prizes" }
+                  allocated: { $ref: "#/components/schemas/RankCounts" }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+    post:
+      tags: [콘솔]
+      summary: 회차 추가
+      description: 배정 합계가 전체 수량을 넘으면 400. `round.create` 기록.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RoundInput" } } }
+      responses:
+        "201": { description: 만든 회차, content: { application/json: { schema: { type: object, properties: { round: { $ref: "#/components/schemas/Round" } } } } } }
+        "400": { description: 입력·수량 오류, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+  /api/admin/rounds/schedule:
+    post:
+      tags: [콘솔]
+      summary: 행사 일정 회차 채우기
+      description: |
+        행사일(3일) × 13:00·17:00 = 6회차 중 빠진 것만 만든다(같은 추첨 시각의 회차가 있으면 건너뜀). 여러 번 눌러도 같다.
+        회차당 1등 1 / 2등 16 / 3등 33, 등록 마감 = 추첨 5분 전, 수령 기한 = 추첨 30분 뒤. 이름은 "수요일 오전 / 수요일 오후".
+      security: [{ console: [] }]
+      responses:
+        "200": { description: 만든 개수, content: { application/json: { schema: { type: object, properties: { created: { type: integer } } } } } }
+        "400": { description: 수량 부족, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+  /api/admin/rounds/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    patch:
+      tags: [콘솔]
+      summary: 회차 수정 (추첨 전만)
+      description: 보낸 필드만 바꾼다. `round.update` 기록.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RoundInput" } } }
+      responses:
+        "200": { description: 바뀐 회차, content: { application/json: { schema: { type: object, properties: { round: { $ref: "#/components/schemas/Round" } } } } } }
+        "400": { description: 이미 추첨됨 · 입력 오류, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 회차 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    delete:
+      tags: [콘솔]
+      summary: 회차 삭제 (추첨 전만)
+      security: [{ console: [] }]
+      responses:
+        "200": { description: ok, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        "400": { description: 이미 추첨됨, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 회차 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/admin/rounds/{id}/preview:
+    get:
+      tags: [콘솔]
+      summary: 지금 추첨하면 들어갈 대상 수
+      security: [{ console: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: 미리보기
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [n, from_seq, to_seq, last]
+                properties:
+                  n: { type: integer }
+                  from_seq: { type: [integer, "null"] }
+                  to_seq: { type: [integer, "null"] }
+                  last: { type: boolean, description: 이 회차 뒤에 회차가 없음 }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 회차 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /api/admin/rounds/{id}/draw:
+    post:
+      tags: [콘솔]
+      summary: 추첨 실행
+      description: |
+        한 트랜잭션에서 advisory lock 2001(추첨) · 1001(등록) · 1002(설문)을 잡는다.
+        - 이미 추첨된 회차면 저장된 결과를 그대로 준다(`alreadyDrawn: true`). 재실행해도 결과는 바뀌지 않는다.
+        - 마감이 더 이른 추첨 전 회차가 있으면 `EARLIER_ROUND_OPEN`.
+        - 추첨 시각(`announce_at`, 없으면 `cutoff_at`) 전이면 `BEFORE_CUTOFF`. `force: true` 면 실행.
+        - 대상 = 등록 마감 전 등록 + 아직 어느 회차에도 속하지 않은 참가자. 전원을 `raffle_entries` 에 스냅샷.
+        - 설문 완료자는 표 2장. 섞은 뒤 앞에서부터 1등 → 2등 → 3등, 1인 1경품. 난수는 암호학적 난수.
+        - 수령 기한 = 실제 추첨 순간 + N분. N 은 `claimMin`(1~240, 미리 안내한 시간보다 짧을 수 없음), 없으면 회차에 잡아 둔 시간.
+      security: [{ console: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+                claimMin: { type: [integer, "null"], minimum: 1, maximum: 240 }
+      responses:
+        "200":
+          description: 결과
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [round, winners, alreadyDrawn]
+                properties:
+                  round: { $ref: "#/components/schemas/Round" }
+                  winners: { type: array, items: { $ref: "#/components/schemas/Winner" } }
+                  alreadyDrawn: { type: boolean }
+        "400": { description: "`EARLIER_ROUND_OPEN` · `BEFORE_CUTOFF` · `BAD_CLAIM_MIN` · `CLAIM_MIN_TOO_SHORT` · 대상 없음", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "404": { description: 회차 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/admin/settings:
+    get:
+      tags: [콘솔]
+      summary: 등록 스위치 · 경품 준비 수량
+      security: [{ console: [] }]
+      responses:
+        "200":
+          description: 설정
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [registrationOpen, stock]
+                properties:
+                  registrationOpen: { type: boolean }
+                  stock: { $ref: "#/components/schemas/Stock" }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+    put:
+      tags: [콘솔]
+      summary: 등록 중단/재개 또는 준비 수량 수정
+      description: |
+        `stock` 이 있으면 수량 수정(보낸 항목만), 없으면 `registrationOpen` 이 필수.
+        수량은 0~100000, 이미 나간 수(등수 경품은 회차에 묶인 수와 수령 수 중 큰 값)보다 줄일 수 없다. 마스크팩 0 = 수량 미설정.
+        기록: `stock.update` / `registration.open` / `registration.pause`.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                registrationOpen: { type: boolean }
+                stock: { $ref: "#/components/schemas/Stock" }
+      responses:
+        "200":
+          description: "`{ stock }` 또는 `{ registrationOpen }`"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registrationOpen: { type: boolean }
+                  stock: { $ref: "#/components/schemas/Stock" }
+        "400": { description: 입력 오류, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/notice:
+    get:
+      tags: [콘솔]
+      summary: 방문객 공지 조회
+      security: [{ console: [] }]
+      responses:
+        "200": { description: 공지, content: { application/json: { schema: { type: object, properties: { notice: { $ref: "#/components/schemas/Notice" } } } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+    put:
+      tags: [콘솔]
+      summary: 공지 올리기 · 고치기 · 내리기
+      description: 빈 문자열이면 내린다. 최대 300자. 올리면 `/api/status` 의 `drawVersion` 이 바뀌어 완료 화면이 새 공지를 받아간다.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string, maxLength: 300 } } } } }
+      responses:
+        "200": { description: 현재 공지, content: { application/json: { schema: { type: object, properties: { notice: { $ref: "#/components/schemas/Notice" } } } } } }
+        "400": { description: 내용 누락 · 길이 초과, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/stats:
+    get:
+      tags: [콘솔]
+      summary: 통계
+      security: [{ console: [] }]
+      responses:
+        "200": { description: 통계, content: { application/json: { schema: { $ref: "#/components/schemas/Stats" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/logs:
+    get:
+      tags: [콘솔]
+      summary: 운영 로그
+      description: 최신순. `before`(id) 로 이어서 불러온다. 추첨 기록의 `detail.eligible`(대상 번호 전체)은 빼고 내려준다.
+      security: [{ console: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+        - { name: actor, in: query, schema: { type: string } }
+        - { name: device, in: query, schema: { type: string } }
+        - { name: group, in: query, schema: { type: string, enum: [claim, round, setting, participant, login] } }
+        - { name: before, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: 로그
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows, more, actors]
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        created_at: { type: string, format: date-time }
+                        actor: { type: string }
+                        action: { type: string }
+                        target: { type: [string, "null"], description: "`participant:<id>` 또는 `round:<id>`" }
+                        detail: { type: [object, "null"] }
+                        device_id: { type: [string, "null"] }
+                        ip: { type: [string, "null"] }
+                        user_agent: { type: [string, "null"] }
+                        seq: { type: [integer, "null"], description: target 이 참가자일 때 그 참여번호 }
+                        round_name: { type: [string, "null"] }
+                  more: { type: boolean }
+                  actors: { type: array, items: { type: string }, description: 지금까지 기록에 나온 이름 전체 }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/live:
+    get:
+      tags: [콘솔]
+      summary: 실시간 상태 바
+      description: 외부 실시간 집계 서버(`REALTIME_URL`)의 숫자를 전달한다. 주소·토큰은 서버에만 둔다. 3초 안에 답이 없으면 `connected: false`.
+      security: [{ console: [] }]
+      responses:
+        "200":
+          description: 상태
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connected]
+                properties:
+                  connected: { type: boolean }
+                  reason: { type: string, description: "connected=false 일 때: off | timeout | HTTP <status>" }
+                  active: { type: integer }
+                  registering: { type: integer }
+                  errorExitRecent: { type: integer }
+                  updatedAt: { type: string }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+
+  /api/admin/reset:
+    post:
+      tags: [콘솔]
+      summary: 전체 초기화 (리허설용)
+      description: |
+        서버 `ALLOW_RESET=1` 일 때만. 참가자·회차·수령·설문·이벤트·로그를 전부 비우고 공지도 내린다.
+        `schedule: false` 가 아니면 행사 일정 회차를 다시 만들고, 그게 실패해도 초기화는 성공으로 답하고 이유만 `scheduleError` 에 준다.
+      security: [{ console: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: string, const: RESET }
+                schedule: { type: boolean, default: true }
+      responses:
+        "200":
+          description: 비워짐
+          content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, scheduleError: { type: [string, "null"] } } } } }
+        "400": { description: confirm 누락, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { $ref: "#/components/responses/LoginRequired" }
+        "403": { description: ALLOW_RESET 꺼짐, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /api/health:
+    get:
+      tags: [운영]
+      summary: 헬스체크
+      description: DB 가 1.5초 안에 답하지 않으면 503. 감시 봇이 60초마다 부른다.
+      responses:
+        "200":
+          description: 정상
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, dbMs, migration, registrationOpen, pools]
+                properties:
+                  ok: { type: boolean, const: true }
+                  dbMs: { type: integer }
+                  migration: { type: [string, "null"], description: 마지막으로 적용된 마이그레이션 파일명 }
+                  registrationOpen: { type: boolean }
+                  pools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        pool: { type: string, enum: [read, write, admin, events] }
+                        total: { type: integer }
+                        idle: { type: integer }
+                        waiting: { type: integer }
+                  events: { type: object, properties: { dropped: { type: integer }, pending: { type: integer } } }
+                  kafka: { type: object, properties: { enabled: { type: boolean }, sent: { type: integer }, failed: { type: integer }, skipped: { type: integer } } }
+        "503":
+          description: DB 응답 없음
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: false }
+                  error: { type: string }
+                  dbMs: { type: integer }
+                  pools: { type: array, items: { type: object } }
+
+components:
+  securitySchemes:
+    console:
+      type: apiKey
+      in: cookie
+      name: tp_console
+  responses:
+    RateLimited:
+      description: "요청 제한 (`RATE_LIMITED`)"
+      headers: { Retry-After: { schema: { type: integer }, description: "2" } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unavailable:
+      description: "`BUSY` · `UNAVAILABLE` · `REGISTRATION_PAUSED` · `SERVER_MISCONFIGURED`"
+      headers: { Retry-After: { schema: { type: integer }, description: "2" } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    LoginRequired:
+      description: 콘솔 로그인 필요
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string, description: 화면에 그대로 띄우는 문구 }
+        code: { type: string }
+        field: { type: string }
+        retryable: { type: boolean }
+        existing: { $ref: "#/components/schemas/Claim" }
+    Rank: { type: integer, enum: [1, 2, 3] }
+    PrizeType: { type: string, enum: [mask, rank1, rank2, rank3] }
+    RankCounts:
+      type: object
+      description: 키는 등수 "1" · "2" · "3"
+      properties: { "1": { type: integer }, "2": { type: integer }, "3": { type: integer } }
+    Stock:
+      type: object
+      properties: { mask: { type: integer }, rank1: { type: integer }, rank2: { type: integer }, rank3: { type: integer } }
+    Prizes:
+      type: object
+      description: 키는 등수. 1 캐리어 · 2 수면안대 · 3 목베개
+      additionalProperties:
+        type: object
+        properties: { name: { type: string }, stock: { type: integer } }
+    Winner:
+      type: object
+      required: [rank, seq]
+      properties: { rank: { $ref: "#/components/schemas/Rank" }, seq: { type: integer } }
+    Notice:
+      type: [object, "null"]
+      properties:
+        text: { type: string }
+        at: { type: string, format: date-time, description: 바뀌면 새 공지로 보고 팝업을 다시 띄운다 }
+    RegisterRequest:
+      type: object
+      required: [displayName, origin, phone, email, consentPrivacy, consentDisplay]
+      properties:
+        displayName: { type: string, description: "영문 대문자·숫자·공백·`.`·`-` + 허용 이모지(최대 3개), 2~12칸. 서버가 대문자화·정리 후 검사" }
+        origin: { type: string, description: "출발지 코드. 목록 밖이면 `OTHER` + originText" }
+        originText: { type: [string, "null"], description: 직접 입력 출발지 (영문·숫자 2자 이상, 보드 칸 폭 이내) }
+        phone: { type: string }
+        phoneCountry: { type: string, description: ISO 국가 코드. 서버가 E.164 로 정규화해 저장 }
+        email: { type: string }
+        consentPrivacy: { type: boolean }
+        consentDisplay: { type: boolean }
+        consentMarketing: { type: boolean }
+        lang: { type: string, enum: [ko, en, zh, ja] }
+        requestId: { type: string, description: 헤더 Idempotency-Key 가 없을 때의 멱등키 }
+    RegisterResponse:
+      type: object
+      required: [participant, replayed]
+      properties:
+        participant: { $ref: "#/components/schemas/PublicParticipant" }
+        replayed: { type: boolean }
+    PublicParticipant:
+      type: object
+      required: [seq, display_name, origin_code, origin_group, created_at]
+      properties:
+        seq: { type: integer }
+        display_name: { type: string }
+        origin_code: { type: string }
+        origin_group: { type: string, enum: [domestic, overseas, other] }
+        created_at: { type: string, format: date-time }
+    RaffleStatus:
+      type: object
+      properties:
+        seq: { type: integer }
+        display_name: { type: string, description: "`/api/check` 에서는 내려주지 않는다" }
+        drawn: { type: boolean, description: 이 번호가 추첨 대상에 들어간 회차가 추첨됨 }
+        round_name: { type: [string, "null"] }
+        drawn_at: { type: [string, "null"], format: date-time }
+        rank: { oneOf: [{ $ref: "#/components/schemas/Rank" }, { type: "null" }] }
+        prize: { type: [string, "null"] }
+        claim_until: { type: [string, "null"], format: date-time }
+        expired: { type: boolean, description: 수령 기한이 지나 당첨이 취소됨 (경품은 재고로) }
+    MyRound:
+      type: [object, "null"]
+      description: 이 참가자가 속한(속하게 될) 회차. 없으면 null
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        state: { type: string, enum: [open, drawing, announced], description: 마감 전 / 마감 지남·미추첨 / 추첨됨 }
+        cutoff_at: { type: string, format: date-time }
+        announce_at: { type: [string, "null"], format: date-time }
+        claim_until: { type: [string, "null"], format: date-time }
+        qty: { $ref: "#/components/schemas/RankCounts" }
+    SurveyState:
+      type: object
+      properties:
+        answers: { type: object, additionalProperties: { type: integer }, description: 문항 번호 → 고른 보기 번호 }
+        done: { type: boolean }
+        until: { type: [string, "null"], format: date-time, description: 새로 시작할 수 있는 기한 (추첨 2분 전) }
+        closes: { type: [string, "null"], format: date-time, description: 이미 시작한 사람이 마저 답할 수 있는 기한 (추첨 시각) }
+        applied: { type: [boolean, "null"], description: 추첨에 실제로 2배로 들어갔는지. 추첨 전이면 null }
+    Me:
+      type: object
+      required: [participant, raffle, round, survey, board, notice, qr, claims]
+      properties:
+        participant: { $ref: "#/components/schemas/PublicParticipant" }
+        raffle: { $ref: "#/components/schemas/RaffleStatus" }
+        round: { $ref: "#/components/schemas/MyRound" }
+        survey: { $ref: "#/components/schemas/SurveyState" }
+        board: { type: [integer, "null"], description: 지금 전광판 위에서 몇 번째 줄에 떠 있는지 (1 = 맨 위). 안 떠 있으면 null }
+        notice: { $ref: "#/components/schemas/Notice" }
+        qr: { type: string, description: 수령 QR 토큰 (90초). 서명 키가 없으면 빈 문자열 }
+        claims:
+          type: array
+          items:
+            type: object
+            properties:
+              prize_type: { $ref: "#/components/schemas/PrizeType" }
+              claimed_at: { type: string, format: date-time }
+    BoardPin:
+      oneOf:
+        - type: object
+          required: [kind, round, drawn_at, winners]
+          properties:
+            kind: { const: winners }
+            round: { type: string }
+            drawn_at: { type: string, format: date-time }
+            winners:
+              type: array
+              description: 숨김 참가자, 기한 만료 당첨은 제외. 등수 → 번호순
+              items:
+                type: object
+                properties:
+                  rank: { $ref: "#/components/schemas/Rank" }
+                  seq: { type: integer }
+                  display_name: { type: string }
+                  origin_code: { type: string }
+        - type: object
+          required: [kind, at]
+          properties:
+            kind: { const: next }
+            at: { type: [string, "null"], format: date-time, description: 1등이 걸린 다음 회차의 추첨 시각 }
+    Round:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        cutoff_at: { type: string, format: date-time, description: 등록 마감 }
+        announce_at: { type: [string, "null"], format: date-time, description: 추첨·발표 예정 시각 }
+        claim_until: { type: [string, "null"], format: date-time }
+        qty_rank1: { type: integer }
+        qty_rank2: { type: integer }
+        qty_rank3: { type: integer }
+        status: { type: string, enum: [open, drawn] }
+        eligible_from_seq: { type: [integer, "null"] }
+        eligible_to_seq: { type: [integer, "null"] }
+        eligible_count: { type: [integer, "null"] }
+        drawn_at: { type: [string, "null"], format: date-time }
+        drawn_by: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+    RoundInput:
+      type: object
+      description: 추가할 때는 name · cutoff_at 필수. 수정할 때는 바꿀 필드만
+      properties:
+        name: { type: string }
+        cutoff_at: { type: string, format: date-time }
+        announce_at: { type: [string, "null"], format: date-time, description: 마감 이후여야 한다 }
+        claim_until: { type: [string, "null"], format: date-time, description: 발표 이후여야 한다 }
+        qty_rank1: { type: integer, minimum: 0, maximum: 10000 }
+        qty_rank2: { type: integer, minimum: 0, maximum: 10000 }
+        qty_rank3: { type: integer, minimum: 0, maximum: 10000 }
+    Claim:
+      type: object
+      properties:
+        id: { type: integer }
+        participant_id: { type: integer }
+        prize_type: { $ref: "#/components/schemas/PrizeType" }
+        claimed_at: { type: string, format: date-time }
+        claimed_by: { type: string }
+        note: { type: [string, "null"] }
+        verify: { type: [object, "null"], description: 예전 기록 호환용. 새 기록은 항상 null }
+    ClaimRequest:
+      type: object
+      required: [participantId, prizeType]
+      properties:
+        participantId: { type: integer, description: participants.id }
+        prizeType: { $ref: "#/components/schemas/PrizeType" }
+        note: { type: string, maxLength: 200 }
+    AdminParticipantBase:
+      type: object
+      description: 콘솔용 참가자 (연락처 포함). 보딩패스 토큰(access_token)은 어떤 응답에도 넣지 않는다
+      properties:
+        id: { type: integer }
+        seq: { type: integer }
+        display_name: { type: string }
+        origin_code: { type: string }
+        origin_group: { type: string, enum: [domestic, overseas, other] }
+        phone: { type: string, description: E.164 }
+        email: { type: string }
+        consent_version: { type: string }
+        consent_privacy_at: { type: string, format: date-time }
+        consent_display_at: { type: string, format: date-time }
+        consent_marketing: { type: boolean }
+        consent_marketing_at: { type: [string, "null"], format: date-time }
+        hidden: { type: boolean }
+        hidden_reason: { type: [string, "null"] }
+        lang: { type: [string, "null"] }
+        source: { type: string, enum: [web, paper] }
+        survey_done_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    AdminParticipant:
+      allOf:
+        - $ref: "#/components/schemas/AdminParticipantBase"
+        - type: object
+          properties:
+            round_id: { type: [integer, "null"] }
+            round_name: { type: [string, "null"] }
+            rank: { type: [integer, "null"] }
+            claims:
+              type: array
+              items:
+                type: object
+                properties:
+                  prize_type: { $ref: "#/components/schemas/PrizeType" }
+                  claimed_at: { type: string, format: date-time }
+                  claimed_by: { type: string }
+                  note: { type: [string, "null"] }
+    InventoryItem:
+      type: object
+      description: 나감 + 당첨 대기 + 예약 + 여유 = 총. 마스크팩 수량 미설정이면 stock · free · remaining 이 null
+      properties:
+        prize_type: { $ref: "#/components/schemas/PrizeType" }
+        stock: { type: [integer, "null"] }
+        claimed: { type: integer, description: 수령 처리된 수 }
+        waiting: { type: integer, description: 당첨됐지만 아직 안 받아 감 (기한 전) }
+        reserved: { type: integer, description: 추첨 전 회차에 걸어 둔 수 }
+        free: { type: [integer, "null"] }
+        remaining: { type: [integer, "null"], description: 부스에 남은 실물 = 총 − 나감 }
+    Inventory:
+      type: object
+      required: [items, recent, serverTime]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/InventoryItem" }, description: rank1 · rank2 · rank3 · mask 순 }
+        recent:
+          type: array
+          items:
+            type: object
+            properties:
+              seq: { type: integer }
+              display_name: { type: string }
+              prize_type: { $ref: "#/components/schemas/PrizeType" }
+              claimed_at: { type: string, format: date-time }
+              claimed_by: { type: string }
+        serverTime: { type: string, format: date-time }
+    Stats:
+      type: object
+      properties:
+        total: { type: integer }
+        domestic: { type: integer }
+        overseas: { type: integer }
+        other: { type: integer }
+        marketing: { type: integer }
+        hidden: { type: integer }
+        first_at: { type: [string, "null"], format: date-time }
+        last_at: { type: [string, "null"], format: date-time }
+        days: { type: integer }
+        byDay: { type: array, items: { type: object, properties: { day: { type: string, description: "YYYY-MM-DD (KST)" }, count: { type: integer } } } }
+        byHour: { type: array, items: { type: object, properties: { hour: { type: string, description: "MM-DD HH:00 (KST)" }, count: { type: integer } } } }
+        byOrigin: { type: array, items: { type: object, properties: { origin_code: { type: string }, origin_group: { type: string }, count: { type: integer } } } }
+        claims: { type: array, items: { type: object, properties: { prize_type: { type: string }, count: { type: integer } } } }
+        winners: { type: array, items: { type: object, properties: { rank: { type: integer }, count: { type: integer } } } }
+        byStaff: { type: array, items: { type: object, properties: { claimed_by: { type: string }, prize_type: { type: string }, count: { type: integer }, last_at: { type: string, format: date-time } } } }
+        survey:
+          type: object
+          properties:
+            started: { type: integer }
+            done: { type: integer }
+            answers: { type: array, items: { type: object, properties: { q: { type: integer }, choice: { type: integer }, n: { type: integer }, fast: { type: integer, description: 1초도 안 걸린 답 } } } }
+        steps: { type: array, items: { type: object, properties: { step: { type: string }, n: { type: integer, description: 그 단계에 도달한 기기 수 } } } }
+        inventory: { $ref: "#/components/schemas/Inventory" }

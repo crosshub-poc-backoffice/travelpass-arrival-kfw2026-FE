@@ -1,0 +1,256 @@
+/* 등록 위저드 (/) 전용. 공용 .card/.input/.btn 은 globals.css */
+
+/* 지구본·칩 줄이 화면 가장자리까지 나가야 해서 여기선 자르지 않는다 (가로 넘침은 .plain 이 막음) */
+.wizard { min-width: 0; }
+
+/* 상단: 뒤로 · 진행 표시 · 언어 */
+.bar { display: flex; align-items: center; gap: 12px; margin-bottom: var(--s3); min-height: 32px; }
+.back, .lang { flex: none; height: 32px; border: none; background: none; color: var(--muted); font-size: 13px; font-weight: 600; padding: 0; }
+.back { width: 24px; font-size: 18px; color: var(--fg); text-align: left; }
+.back:disabled { opacity: 0; pointer-events: none; }
+.progress { flex: 1; display: flex; gap: 5px; }
+.progress i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); transition: background 0.3s; }
+.progress i.on { background: var(--yellow); }
+
+/* backwards: 끝난 뒤엔 transform 이 남지 않게 (남으면 안쪽 position: fixed(.nameSheet)가 화면이 아니라 이 상자 기준이 된다) */
+.step { animation: stepIn 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+@keyframes stepIn { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+.h { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; margin-bottom: var(--s1); word-break: keep-all; }
+.sub { color: var(--muted); font-size: 15px; margin-bottom: var(--s3); word-break: keep-all; }
+.cta { margin-top: var(--s3); }
+.err { font-size: 13px; color: var(--red); margin-top: var(--s1); }
+.hint { font-size: 13px; color: var(--muted); margin-top: var(--s1); }
+.link { background: none; border: none; color: var(--muted); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; padding: 0; margin-top: var(--s2); }
+.foot { margin-top: var(--s2); font-size: 13px; color: var(--muted); text-align: center; }
+.foot button { background: none; border: none; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; margin-left: 6px; font-size: 13px; }
+
+/* 퀴즈·추가 질문: 질문 한 줄 + 세로로 큰 보기 4개. 누르면 바로 다음으로 넘어가서 '다음' 버튼이 없다 */
+/* 묻는 말만 크게 세운다: 상황 줄(.qLead)은 작은 회색, 보기는 한 단계 가볍게. 다 같은 무게면 무엇을 묻는지 한눈에 안 들어온다.
+   어두운 바탕의 굵은 한글은 획이 뭉쳐 보여서 제목(.h)보다 굵기를 낮추고 줄 간격·자간을 풀었다 */
+.q { margin-bottom: var(--s3); font-weight: 600; line-height: 1.45; letter-spacing: 0; text-wrap: balance; }
+.qLead { display: block; margin-bottom: 6px; font-size: 15px; font-weight: 500; line-height: 1.5; color: var(--muted); }
+.opts { display: grid; gap: 12px; }
+.opt {
+  width: 100%; min-height: 60px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 20px;
+  font-size: 17px; font-weight: 500; line-height: 1.4; text-align: left; word-break: keep-all; color: var(--fg);
+  transition: border-color 0.15s, background 0.15s, opacity 0.2s, transform 0.05s;
+}
+.opt:active { transform: scale(0.99); }
+.opt.picked { border-color: var(--yellow); background: rgba(245, 196, 0, 0.1); }
+.opt.right { border-color: var(--green); background: rgba(53, 208, 127, 0.12); color: var(--green); opacity: 1; }
+.opt.wrong { opacity: 0.35; animation: nope 0.3s; }
+.opt:disabled:not(.right):not(.wrong):not(.picked) { opacity: 0.5; }
+@keyframes nope { 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+/* 추가 질문 상단의 남은 시간. 평소엔 조용히, 5분 안쪽이면 숫자로 */
+.timeLeft { flex: none; font-size: 13px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.timeLeft.soon { color: var(--yellow); }
+/* 완료 화면: 추첨번호 옆 "당첨 확률 2배" */
+.raffleNo .x2 { margin-left: 12px; font-size: 13px; font-weight: 600; color: var(--green); }
+.bonus {
+  display: inline-flex; align-items: center; min-height: 44px; margin-top: var(--s2); padding: 0 20px;
+  background: none; border: 1px solid var(--yellow-dim); border-radius: 999px; color: var(--yellow); font-size: 15px; font-weight: 600;
+  transition: transform 0.05s;
+}
+.bonus:active { transform: scale(0.98); }
+
+/* 언어 선택 */
+.langTitle { text-align: center; margin: var(--s4) 0 var(--s3); }
+.langTitle b { display: block; font-size: 24px; margin-bottom: 4px; }
+.langTitle span { color: var(--muted); font-size: 15px; }
+.langBtns { display: grid; gap: 12px; }
+.langBtn {
+  display: flex; align-items: baseline; justify-content: space-between; width: 100%;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px;
+  font-size: 19px; font-weight: 700; text-align: left; transition: border-color 0.15s, transform 0.05s;
+}
+.langBtn:active { transform: scale(0.99); border-color: var(--yellow); }
+
+/* 지구본 */
+.globeWrap { position: relative; margin: calc(var(--s2) * -1) calc(var(--gutter) * -1) var(--s2); }
+.globe {
+  display: block; width: 100%; height: min(78vw, 330px); touch-action: pan-y; cursor: grab; transition: height 0.35s;
+  -webkit-mask-image: linear-gradient(transparent, #000 7%, #000 78%, transparent); mask-image: linear-gradient(transparent, #000 7%, #000 78%, transparent);
+}
+/* 한국 시도 선택: 칩이 5줄이라 지구본을 낮춰 한 화면에 담는다 */
+.globe.compact { height: min(54vw, 220px); }
+.globe:active { cursor: grabbing; }
+
+/* 나라 칩: 2줄 가로 스크롤 (지구본이 화면에서 밀려나지 않게) */
+.strip {
+  display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto); gap: 8px;
+  overflow-x: auto; margin: 0 calc(var(--gutter) * -1); padding: 2px var(--gutter); scrollbar-width: none; scroll-padding: var(--gutter);
+}
+.strip::-webkit-scrollbar { display: none; }
+.chip {
+  display: flex; align-items: center; gap: 7px; white-space: nowrap; height: 42px; padding: 0 14px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; font-size: 14px; font-weight: 600;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.chip.on { background: var(--yellow); border-color: var(--yellow); color: #111; }
+.chip.home { border-color: var(--yellow-dim); }
+.regions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; animation: stepIn 0.3s both; }
+.regions .chip { justify-content: center; padding: 0 4px; border-radius: 10px; }
+/* 출발지 직접 입력칸 */
+.typed { margin-top: var(--s2); }
+
+/* 전화번호 */
+.phoneRow { display: flex; gap: 8px; }
+/* 국가번호 고정: 번호와 한 입력칸 안에 */
+.phoneField { display: flex; align-items: center; gap: 10px; padding: 0 14px !important; }
+.phoneField:focus-within { border-color: var(--yellow); }
+.dialFixed { flex: none; font-size: 18px; font-weight: 600; white-space: nowrap; color: var(--muted); }
+.bare { flex: 1; min-width: 0; background: none; border: none; outline: none; font-size: 18px; padding: 14px 0; }
+.big { font-size: 18px !important; padding: 14px !important; }
+/* 이름 입력: 평소엔 흐름 안에, 입력칸 포커스 중엔 키보드 위 보이는 영역을 입력칸 + 이모지로만 채운다 (RegisterFlow NameStep) */
+/* 화면 전체 폭을 덮되, 내용은 평소 화면과 같은 460px 폭 안에 (넓은 화면에서 칸이 커지지 않게) */
+.nameSheet { position: fixed; left: 0; right: 0; z-index: 50; display: flex; flex-direction: column; padding: 12px max(var(--gutter, 16px), calc((100% - 460px) / 2)); background: var(--bg); overflow: hidden; }
+/* 보이는 영역이 좁으면 줄어들고, 키보드가 없어 넓으면 버튼이 너무 커지지 않게 상한 */
+.nameSheet .palette { flex: 0 1 auto; min-height: 0; max-height: 280px; height: 100%; grid-auto-rows: minmax(0, 1fr); margin-top: 10px; }
+.nameSheet .emojiBtn { aspect-ratio: auto; min-height: 0; }
+.nameSheet .hint { margin-top: 6px; }
+.notice { color: var(--yellow); }
+
+/* 이름 이모지 팔레트: 8칸 격자, 전광판과 같은 Fluent 3D 그림 */
+.palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-top: var(--s2); }
+/* 상자 없이 그림만: 위 전광판이 주인공이고 이건 도구라서. 누르는 순간에만 바탕이 깔린다 */
+.emojiBtn { aspect-ratio: 1; border: none; border-radius: 10px; background: none; display: flex; align-items: center; justify-content: center; padding: 0; -webkit-tap-highlight-color: transparent; transition: transform 0.08s; }
+.emojiBtn .emojiImg { width: 58%; height: 58%; }
+.emojiBtn:active { transform: scale(0.9); background: var(--panel-2); }
+.emojiBtn:disabled { opacity: 0.3; }
+.emojiImg { display: inline-block; width: 1em; height: 1em; vertical-align: -0.12em; object-fit: contain; }
+
+/* 미니 플립보드 */
+.mini { container-type: inline-size; margin-bottom: var(--s2); }
+.miniLine + .miniLine { margin-top: var(--s2); }
+.miniLabel { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.22em; color: var(--yellow); margin-bottom: 6px; }
+.miniRow { --cg: 2px; --cw: calc((100cqw - 11 * var(--cg)) / 12); --ch: calc(var(--cw) * 1.5); display: flex; gap: var(--cg); }
+.miniCell { position: relative; width: var(--cw); height: var(--ch); perspective: 300px; background: #1f1f24; border-radius: 3px; font-family: var(--mono); font-size: calc(var(--cw) * 0.84); font-weight: 600; color: #ededed; }
+.miniDim .miniCell { color: #5d5d66; }
+/* 예시(placeholder) 속 이모지도 흐린 글자처럼 회색 실루엣으로 */
+.miniDim :global(.emoji-img) { filter: grayscale(1) brightness(0.5); opacity: 0.7; }
+/* 이름 입력 = 플립 줄. 투명 input 을 위에 덮어 키보드 입력을 받는다 (NameBoardInput) */
+.nameBoard { position: relative; container-type: inline-size; }
+.nameBoardInput { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; border: 0; padding: 0; background: transparent; color: transparent; caret-color: transparent; cursor: text; }
+.nameBoardInvalid .miniCell { box-shadow: inset 0 0 0 1px var(--red); }
+/* 커서 칸: 노란 밑줄이 깜빡인다 */
+.caretCell::after { content: ""; position: absolute; left: 15%; right: 15%; bottom: 3px; height: 2px; border-radius: 1px; background: var(--yellow); z-index: 3; animation: caretBlink 1s steps(1, end) infinite; }
+@keyframes caretBlink { 50% { opacity: 0; } }
+/* 반쪽을 0.5px 씩 겹친다: 칸 높이가 소수점 픽셀이면 두 반쪽의 잘린 경계가 같은 픽셀에서 반투명하게 겹쳐 글자 가운데 어두운 가로줄이 생긴다 */
+.half { position: absolute; left: 0; right: 0; height: calc(50% + 0.5px); overflow: hidden; display: flex; justify-content: center; line-height: var(--ch); white-space: pre; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+/* 위에서 아래로 이음새 없이 어두워지는 한 장의 판 (가운데 선을 일부러 긋지 않는다: 글자가 잘려 읽기 어렵다) */
+.top { top: 0; align-items: flex-start; border-radius: 3px 3px 0 0; transform-origin: bottom; background: linear-gradient(#27272d, #1f1f24); }
+.bottom { bottom: 0; align-items: flex-end; border-radius: 0 0 3px 3px; transform-origin: top; background: linear-gradient(#1f1f24, #17171b); }
+.half:global(.emo) { font-size: 0.72em; font-family: var(--emoji); }
+.flapTop { transform: rotateX(-90deg); z-index: 2; opacity: 0; }
+.flapBottom { transform: rotateX(90deg); z-index: 2; opacity: 0; }
+
+/* 동의 */
+.all { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: none; background: none; font-size: 19px; font-weight: 700; text-align: left; margin: var(--s4) 0 0; }
+/* 전체 동의는 누르기 쉽게 항목 아래, 입국 버튼 바로 위에 둔다 */
+.h + :global(.check) { margin-top: var(--s3); }
+/* 전체 동의 표시: 아래 항목 체크박스(.plain .check input)와 같은 모양 */
+/* 개별 항목보다 한 단계 크게(26px), 글자 시작선은 항목과 맞춘다(26+8 = 22+12) */
+.tick { flex: none; width: 26px; height: 26px; border-radius: 7px; border: 2px solid var(--fg); }
+.all.on .tick { border-color: var(--yellow); background: var(--yellow) var(--check) center / 16px no-repeat; }
+/* 개별 항목은 한 톤 낮춰 전체 동의가 먼저 읽히게 한다 */
+.h ~ :global(.check) :global(.t) { font-weight: 500; color: var(--muted); }
+.h ~ :global(.check):has(input:checked) :global(.t) { color: var(--fg); }
+
+/* 입국 완료 홈. 전광판에 떠 있는 동안은 전광판 안내가 맨 위, 그 아래 추첨 안내(추첨번호 · 발표까지 남은 시간 · 경품).
+   당첨되면 당첨 안내가 맨 위를 차지한다. 글은 모두 가운데 한 줄기 */
+.homeTop { display: flex; justify-content: center; padding-top: 16px; margin-bottom: var(--s4); }
+/* 결과 공개 연출 로고와 같은 자리·크기 (화면 위 36px, 높이 24px) */
+.homeTop img { display: block; height: 24px; width: auto; }
+.hero { text-align: center; }
+.hero .h, .hero .sub { margin-bottom: 0; }
+.hero .h + .sub { margin-top: var(--s1); }
+/* 전광판 안내: "전광판을 보세요" → 내 이름(전광판에 적힌 그대로, 가장 크게) → 어느 줄인지 */
+/* 층 사이(전광판 → 추첨 → 공지)는 72px, 층 안은 16~32px. 같은 간격이 반복되면 덩어리가 안 보인다 */
+.board { width: 100%; max-width: 460px; margin: 0 auto; text-align: center; padding-bottom: 72px; }
+.board .h, .board .sub { margin-bottom: 0; }
+.boardName { margin: var(--s2) 0 var(--s1); font-family: var(--display); font-size: clamp(34px, 11vw, 48px); font-weight: 600; line-height: 1.1; letter-spacing: 0.01em; text-transform: uppercase; color: var(--yellow); overflow-wrap: anywhere; }
+/* 당첨 화면: 등수(가장 크게) → 할 일 한 줄 → 항목 목록 → QR 버튼 */
+.wonBig { font-size: clamp(44px, 14vw, 60px); font-weight: 800; line-height: 1.1; letter-spacing: -0.03em; color: var(--yellow); word-break: keep-all; }
+.wonLine { margin-top: 12px; font-size: 17px; font-weight: 600; word-break: keep-all; }
+.facts { width: fit-content; margin: var(--s3) auto 0; font-size: 15px; text-align: left; }
+.facts div:has(> dt) { display: grid; grid-template-columns: 5.5em auto; gap: 8px; align-items: baseline; }
+.facts .fold div:has(> dt) { padding-top: 10px; }
+.facts dt { color: var(--muted); }
+.facts dd { font-weight: 600; }
+/* 접히는 칸 (Fold). 경품을 받으면 장소·기한·QR 버튼이 접히면서 아래 내용이 부드럽게 올라온다 */
+.fold { width: 100%; display: grid; justify-items: center; grid-template-rows: 1fr; transition: grid-template-rows 0.5s cubic-bezier(0.3, 0, 0.2, 1), opacity 0.3s; }
+.fold > div { width: 100%; min-height: 0; overflow: hidden; }
+.facts .fold { justify-items: start; }
+.foldShut { grid-template-rows: 0fr; opacity: 0; }
+/* 추첨 안내: 내 추첨번호 한 줄 → "12:30 발표" → 남은 시간. 덤이라 카드보다 조용하게 */
+.raffleNo { font-size: 15px; font-weight: 500; color: var(--muted); margin-bottom: var(--s2); }
+.raffleNo b { margin-left: 8px; font-family: var(--display); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; color: var(--fg); vertical-align: -1px; }
+.countTitle { font-size: 15px; font-weight: 500; color: var(--muted); }
+.count { display: flex; justify-content: center; font-family: var(--display); font-size: clamp(40px, 12.5vw, 52px); font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1; margin-top: 8px; transition: font-size 0.5s cubic-bezier(0.3, 0, 0.2, 1); }
+/* 전광판에 떠 있는 동안은 이름이 주인공이라 남은 시간을 한 단계 줄인다. 전광판 안내가 접히면 제 크기로 돌아온다 */
+.underBoard .count { font-size: clamp(28px, 8.5vw, 34px); }
+@media (prefers-reduced-motion: reduce) { .count { transition: none; } }
+.count span { display: flex; }
+/* 글꼴의 고정폭 숫자를 써서 초가 바뀌어도 흔들리지 않는다 */
+.count b { font-weight: inherit; }
+.count em { width: 0.36em; text-align: center; font-style: normal; color: var(--muted); opacity: 0.6; transform: translateY(-0.06em); }
+/* 경품 수령 QR (QrSheet): 흰 화면에 번호 · QR · 등수 */
+.qrSheet { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 20px 20px 76px; background: #fff; color: #101828; text-align: center; cursor: pointer; animation: sheetIn 0.3s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.qrSheetOut { animation: sheetOut 0.22s ease-in forwards; }
+@keyframes sheetIn { from { opacity: 0; transform: scale(0.96); } }
+@keyframes sheetOut { to { opacity: 0; transform: scale(0.96); } }
+.qrNo { font-family: var(--display); font-size: 44px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.qrNo small { display: block; font-family: var(--sans); font-size: 13px; font-weight: 500; color: rgba(16, 24, 40, 0.5); margin-bottom: 8px; }
+.qrWho { font-size: 20px; font-weight: 700; word-break: keep-all; }
+/* 화면 어디를 눌러도 닫히므로 닫기는 글자로만 조용히 둔다 */
+.qrClose { position: absolute; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 12px 24px; border: none; background: none; color: rgba(16, 24, 40, 0.5); font-size: 15px; font-weight: 500; }
+/* 개발 모드 전용: 화면 상태 미리보기 스위치 (운영 빌드에는 없다) */
+/* 왼쪽 아래의 Next 개발 배지를 피해서 그 오른쪽에 둔다 */
+.preview { position: fixed; left: 68px; right: 8px; bottom: 16px; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; }
+.preview > * { pointer-events: auto; }
+.preview button { flex: none; padding: 6px 9px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.preview button.on { background: var(--fg); color: #111; }
+.preview .pvToggle { padding: 8px 12px; background: rgba(28, 28, 33, 0.94); border: 1px dashed var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* 축마다 한 줄: 왼쪽에 축 이름, 오른쪽에 고를 값. 좁으면 값이 다음 줄로 넘어간다 (가로 스크롤 없음) */
+.pvPanel { display: grid; gap: 6px; max-width: 100%; padding: 10px 10px 10px 12px; border-radius: 14px; background: rgba(28, 28, 33, 0.96); border: 1px dashed var(--muted); }
+.pvRow { display: grid; grid-template-columns: 40px 1fr; align-items: start; gap: 6px; }
+.pvRow > span { padding-top: 6px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.pvRow > div { display: flex; flex-wrap: wrap; gap: 2px; }
+.rise { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rise2 { animation-delay: 0.12s; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+/* 경품: 작은 한 줄 */
+.prizeLine { margin-top: var(--s3); font-size: 13px; line-height: 1.5; color: var(--muted); word-break: keep-all; text-wrap: balance; }
+.prizeLine + .onsite { margin-top: var(--s1); }
+.quietLink { display: inline-block; margin-top: var(--s2); padding: 8px; font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+.onsite { margin-top: var(--s3); font-size: 13px; line-height: 1.5; color: var(--muted); text-align: center; word-break: keep-all; text-wrap: balance; }
+
+/* 입국 도장 */
+.stampStage { min-height: 70dvh; display: grid; place-items: center; }
+.stamp {
+  width: 230px; height: 230px; border-radius: 50%; border: 5px solid var(--green); color: var(--green);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center;
+  font-family: var(--mono); font-weight: 700; letter-spacing: 0.12em; box-shadow: inset 0 0 0 4px var(--bg), inset 0 0 0 6px var(--green);
+  animation: stamp 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+.stamp small { font-size: 11px; }
+.stamp small:first-child { font-family: var(--sans); letter-spacing: 0.04em; font-size: 12px; }
+.stamp b { font-size: 26px; line-height: 1.1; }
+.stamp em { font-style: normal; font-size: 13px; border-top: 2px solid var(--green); border-bottom: 2px solid var(--green); padding: 3px 12px; margin: 4px 0; }
+@keyframes stamp { from { opacity: 0; transform: rotate(-12deg) scale(2.6); } 60% { opacity: 1; } to { opacity: 0.95; transform: rotate(-12deg) scale(1); } }
+
+/* 완료 화면의 언어 바꾸기: 맨 아래 가운데에 글자만 */
+.langFloat { width: 100%; max-width: 460px; display: flex; justify-content: center; margin-top: var(--s4); }
+.langFloat select { border: none; padding: 6px 4px; font-size: 13px; color: var(--muted); text-align: center; text-align-last: center; }
+
+@media (prefers-reduced-motion: reduce) { .step, .regions, .stamp, .rise, .qrSheet, .opt.wrong { animation-duration: 0.01s; } .fold { transition: none; } }
+
+/* 운영 공지: 발표 보기 버튼 아래 여백만으로 구분. 처음 보는 공지는 팝업 */
+.noticeBox { margin-top: 72px; text-align: center; }
+/* 공지는 카드가 아니라서 카드끼리의 간격 규칙이 안 먹는다. 바로 아래 링크 묶음과 같은 간격으로 띄운다 */
+.noticeBox + :global(.tp-links-quiet) { margin-top: var(--s3); }
+.noticeH { color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.noticeText { color: var(--fg); font-size: 15px; line-height: 1.55; white-space: pre-wrap; word-break: keep-all; overflow-wrap: anywhere; }
+.noticePop { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0, 0, 0, 0.6); animation: sheetIn 0.25s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.noticeCard { width: 100%; max-width: 400px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px 20px 20px; }
+.noticePopH { font-size: 20px; font-weight: 700; margin-bottom: var(--s2); }
