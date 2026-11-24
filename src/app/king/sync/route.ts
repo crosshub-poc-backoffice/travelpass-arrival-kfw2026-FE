@@ -40,7 +40,7 @@ async function run(cmds: Cmd[]): Promise<(string | null)[]> {
   return ((await r.json()) as { result: string | null }[]).map((x) => x.result ?? null);
 }
 
-type Stored = Pick<KingState, "epoch" | "step" | "guest" | "fx" | "at">;
+type Stored = Pick<KingState, "epoch" | "step" | "guest" | "fx" | "at" | "drawAt">;
 
 /** 저장소가 비어 있을 때 쓸 기본 손님. 환경변수 KING_NAME · KING_ORIGIN · KING_RANK 로 바꿀 수 있다 */
 const DEFAULT_NAME = "LEE EOGWEON✨";
@@ -50,13 +50,13 @@ function defaultGuest(): KingGuest | null {
   const rank = Number(process.env.KING_RANK ?? 2);
   return { name, origin: normalizeText(process.env.KING_ORIGIN ?? "SEOUL").slice(0, FROM_WIDTH) || "SEOUL", rank: ([1, 2, 3].includes(rank) ? rank : 2) as KingGuest["rank"], seq: 1 };
 }
-const EMPTY: Stored = { epoch: 0, step: 0, guest: defaultGuest(), fx: KING_FX, at: null };
+const EMPTY: Stored = { epoch: 0, step: 0, guest: defaultGuest(), fx: KING_FX, at: null, drawAt: null };
 
 function parse(raw: string | null): Stored {
   if (!raw) return EMPTY;
   try {
     const s = JSON.parse(raw) as Partial<Stored>;
-    return { ...EMPTY, ...s, guest: s.guest ?? EMPTY.guest, fx: { ...KING_FX, ...s.fx } };
+    return { ...EMPTY, ...s, guest: s.guest ?? EMPTY.guest, fx: { highlight: s.fx?.highlight ?? KING_FX.highlight, confetti: s.fx?.confetti ?? KING_FX.confetti, sound: s.fx?.sound ?? KING_FX.sound } };
   } catch { return EMPTY; }
 }
 const num = (raw: string | null) => (raw && Number.isFinite(Number(raw)) ? Number(raw) : null);
@@ -109,13 +109,15 @@ export async function POST(req: NextRequest) {
         // 등록되는 순간 화면이 같이 보낸 번호(실제 마지막 번호 + 1)를 한 번에 적는다. 따로 보내면 두 요청이 서로 덮어쓸 수 있다
         const seq = Math.floor(Number(b.seq));
         const guest = cur.guest && step === 1 && seq >= 1 && seq <= 9999 ? { ...cur.guest, seq } : cur.guest;
-        next = { ...cur, guest, step: step as KingStep, at: cur.at ?? new Date().toISOString() };
+        // 추첨으로 넘어가는 순간의 시각을 적어 둔다. 화면들은 이 시각에서 같은 시간만큼 뜸을 들인 뒤 발표한다
+        const drawAt = cur.drawAt ?? (step >= 2 ? Date.now() : null);
+        next = { ...cur, guest, step: step as KingStep, at: cur.at ?? new Date().toISOString(), drawAt };
       }
     } else if (b.action === "fx") {
       const f = (b.fx ?? {}) as Record<string, unknown>;
-      next = { ...cur, fx: { solo: f.solo === true, confetti: f.confetti === true, sound: f.sound === true } };
+      next = { ...cur, fx: { highlight: f.highlight === true, confetti: f.confetti === true, sound: f.sound === true } };
     } else if (b.action === "reset") {
-      next = { ...cur, epoch: Date.now(), step: 0, at: null };
+      next = { ...cur, epoch: Date.now(), step: 0, at: null, drawAt: null };
     } else {
       return fail(400, "action");
     }
