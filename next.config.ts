@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { PHASE_PRODUCTION_BUILD } from "next/constants";
 
 /**
  * 보안 헤더 (모든 경로).
@@ -21,9 +22,10 @@ const SECURITY_HEADERS = [
  * 백엔드 주소. 이 앱은 화면만 가지고, /api/* 와 /go/* 는 전부 백엔드로 넘긴다 (docs/openapi.yaml).
  * 브라우저는 계속 같은 주소를 부르므로 쿠키(tp_pass · tp_dev · tp_console)는 이 도메인의 것 그대로다.
  */
-const BACKEND_URL = (process.env.BACKEND_URL ?? "http://localhost:8080").replace(/\/$/, "");
+const BACKEND_URL = (process.env.BACKEND_URL ?? "").replace(/\/$/, "");
+const LOCAL_BACKEND = "http://localhost:8080";
 
-const nextConfig: NextConfig = {
+const nextConfig = (backend: string): NextConfig => ({
   // 보드/통계는 전부 클라이언트에서 API 를 폴링하므로 캐시 컴포넌트는 끈다.
   cacheComponents: false,
   // 같은 와이파이의 폰에서 개발 서버(http://<맥 IP>:3000)로 열 때 JS·HMR 요청이 막히지 않게
@@ -31,13 +33,23 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   async rewrites() {
     return [
-      { source: "/api/:path*", destination: `${BACKEND_URL}/api/:path*` },
-      { source: "/go/:path*", destination: `${BACKEND_URL}/go/:path*` },
+      { source: "/api/:path*", destination: `${backend}/api/:path*` },
+      { source: "/go/:path*", destination: `${backend}/go/:path*` },
     ];
   },
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
-};
+});
 
-export default nextConfig;
+/**
+ * 배포용 빌드(next build)는 BACKEND_URL 이 없으면 실패시킨다.
+ * 주소 없이 배포되면 /api 가 전부 localhost 로 가서 등록·전광판·콘솔이 한꺼번에 죽는다.
+ * 빌드가 실패하면 호스팅(Vercel)은 직전 배포를 그대로 서비스한다. 개발 서버(next dev)는 로컬 백엔드를 기본으로 쓴다.
+ */
+export default function config(phase: string): NextConfig {
+  if (phase === PHASE_PRODUCTION_BUILD && !BACKEND_URL) {
+    throw new Error("BACKEND_URL 이 없어요. 백엔드 주소(예: https://api.example.com)를 환경변수로 넣고 다시 빌드해 주세요.");
+  }
+  return nextConfig(BACKEND_URL || LOCAL_BACKEND);
+}
