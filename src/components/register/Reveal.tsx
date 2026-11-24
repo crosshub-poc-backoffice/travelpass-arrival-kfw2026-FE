@@ -8,18 +8,8 @@ import s from "./reveal.module.css";
 const OPEN_MS = 1100;
 const COLORS = ["#f5c400", "#ff682c", "#fb0046", "#ffffff", "#5aa9ff", "#35d07f"];
 
-/** 경품 그림: 1등 캐리어 · 2등 수면안대 · 3등 목베개 · 그 밖 마스크팩 */
-function Prize({ rank }: { rank: Rank | "mask" }) {
-  if (rank === "mask") return (
-    <svg viewBox="0 0 120 120" aria-hidden="true">
-      <rect x="28" y="14" width="64" height="92" rx="8" fill="#ff8fb1" />
-      <path d="M28 26h64" stroke="#e86d93" strokeWidth="4" strokeDasharray="5 4" />
-      <path d="M60 44c-12 0-20 9-20 22s9 24 20 24 20-11 20-24-8-22-20-22z" fill="#fff" opacity="0.92" />
-      <circle cx="52" cy="62" r="3" fill="#ff8fb1" /><circle cx="68" cy="62" r="3" fill="#ff8fb1" />
-      <path d="M53 74q7 6 14 0" fill="none" stroke="#ff8fb1" strokeWidth="3" strokeLinecap="round" />
-      <rect x="34" y="32" width="4" height="30" rx="2" fill="#fff" opacity="0.5" />
-    </svg>
-  );
+/** 경품 그림: 1등 캐리어 · 2등 수면안대 · 3등 목베개 */
+function Prize({ rank }: { rank: Rank }) {
   if (rank === 1) return (
     <svg viewBox="0 0 120 120" aria-hidden="true">
       <path d="M46 30V17a7 7 0 0 1 7-7h14a7 7 0 0 1 7 7v13" fill="none" stroke="#c9cbd3" strokeWidth="6" strokeLinecap="round" />
@@ -96,9 +86,9 @@ function useConfetti(ref: React.RefObject<HTMLCanvasElement | null>, on: boolean
 }
 
 interface RevealProps {
-  /** 당첨 등수. 1~3등이 아니면 "mask"(마스크팩 당첨). null 이면 조용히 열리는 미당첨 연출 */
-  rank: Rank | "mask" | null;
-  /** 큰 글자 ("축하해요!")와 그 아래 한 줄 ("1등 · 캐리어" / "마스크팩 당첨") */
+  /** 당첨 등수. null 이면 조용히 열리는 미당첨 연출 */
+  rank: Rank | null;
+  /** 큰 글자 ("축하해요!")와 그 아래 한 줄 ("1등 · 캐리어") */
   title: string; line: string;
   okLabel: string;
   onDone: () => void;

@@ -30,7 +30,8 @@ export default function Inventory({ refreshKey = 0, recentLimit = 20 }: { refres
     <div className="card" style={{ maxWidth: "none" }}>
       <h2 className="sec">실시간 재고{err && <small className="sub"> · 연결 끊김</small>}</h2>
       <div className="inv">
-        {inv.items.map((it) => {
+        {/* 마스크팩은 현장에서 따로 나눠 줘서 재고에 넣지 않는다 */}
+        {inv.items.filter((it) => it.prize_type !== "mask").map((it) => {
           const low = it.remaining !== null && it.stock !== null && it.remaining <= Math.max(1, Math.ceil(it.stock * 0.1));
           return (
             <div key={it.prize_type} className={`stat ${low ? "low" : ""}`}>

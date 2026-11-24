@@ -67,11 +67,9 @@ export function scheduleRounds() {
   }));
 }
 
-/** 마스크팩 준비 수량. MASK_STOCK 미설정(0)이면 재고 없이 수령 수만 센다 */
-export const MASK_PACK = { name: "마스크팩", note: "등록 참가자 전원 1개", stock: Math.max(0, parseInt(process.env.MASK_STOCK ?? "0", 10) || 0) };
-
 export const PRIZE_LABEL: Record<PrizeType, string> = {
-  mask: MASK_PACK.name,
+  // 마스크팩은 이제 화면에서 다루지 않는다. 백엔드 기록에 남은 옛 값을 읽을 때만 쓰는 이름
+  mask: "마스크팩",
   rank1: `1등 · ${PRIZES[1].name}`,
   rank2: `2등 · ${PRIZES[2].name}`,
   rank3: `3등 · ${PRIZES[3].name}`,

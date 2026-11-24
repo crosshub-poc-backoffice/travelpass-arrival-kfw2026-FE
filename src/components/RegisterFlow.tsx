@@ -718,7 +718,7 @@ const SHOW_PREVIEW = process.env.NODE_ENV !== "production" || process.env.NEXT_P
 
 /** 미리보기 축. 축마다 따로 고른다: 추첨 상태 × 전광판 × 설문. 값 "" 는 서버가 준 실제 상태 그대로 */
 const PV_AXES = [
-  { key: "raffle", label: "추첨", options: [["", "실제"], ["open", "모집"], ["drawing", "추첨 중"], ["won1", "1등"], ["won2", "2등"], ["won3", "3등"], ["lost", "마스크팩"], ["claimed", "수령 완료"]] },
+  { key: "raffle", label: "추첨", options: [["", "실제"], ["open", "모집"], ["drawing", "추첨 중"], ["won1", "1등"], ["won2", "2등"], ["won3", "3등"], ["lost", "미당첨"], ["claimed", "수령 완료"], ["expired", "기한 지남"]] },
   { key: "board", label: "전광판", options: [["", "실제"], ["on", "떠 있음"], ["off", "내려감"]] },
   { key: "survey", label: "설문", options: [["", "실제"], ["new", "안 함"], ["mid", "3문항 답함"], ["done", "완료"]] },
 ] as const;
@@ -738,11 +738,12 @@ function previewMe(me: Me, pv: Preview, since: number): Me {
   const r = pv.raffle;
   if (!r) return out;
   const base: MyRound = me.round ?? { name: "PREVIEW", state: "open", cutoff_at: at(60), announce_at: at(90), claim_until: at(120), qty: { 1: 1, 2: 17, 3: 34 } };
-  const waiting = { raffle: null, claims: me.claims.filter((c) => c.prize_type === "mask") };
+  const waiting = { raffle: null, claims: [] as Me["claims"] };
   if (r === "open") return { ...out, ...waiting, round: { ...base, state: "open", cutoff_at: at(60), announce_at: at(90) } };
   if (r === "drawing") return { ...out, ...waiting, round: { ...base, state: "drawing", cutoff_at: at(-1), announce_at: at(20) } };
   const rank = r === "lost" ? null : r === "won3" ? 3 : r === "won2" ? 2 : 1;
-  const claims = r === "claimed" ? [...waiting.claims, { prize_type: "rank1" as PrizeType, claimed_at: at(0) }] : waiting.claims;
+  const claims = r === "claimed" ? [{ prize_type: "rank1" as PrizeType, claimed_at: at(0) }] : waiting.claims;
+  if (r === "expired") return { ...out, claims, round: { ...base, state: "announced", claim_until: at(-5) }, raffle: { drawn: true, round_name: base.name, rank, prize: null, expired: true } };
   return { ...out, claims, round: { ...base, state: "announced" }, raffle: { drawn: true, round_name: base.name, rank, prize: null } };
 }
 
@@ -806,13 +807,10 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
   const p = me.participant;
   const r = me.raffle;
   const round = me.round;
-  const masked = me.claims.some((c) => c.prize_type === "mask");
   const rankType = r?.rank ? (`rank${r.rank}` as PrizeType) : null;
   const rankClaimed = rankType ? me.claims.some((c) => c.prize_type === rankType) : false;
   /** 수령 기한이 지나 당첨이 자동 취소됨 */
   const expired = !!r?.expired && !rankClaimed;
-  /** 등수 경품은 취소됐어도 마스크팩은 등록자 전원 몫이라 QR 로 받을 수 있다 (안 주면 현장에서 기록 없이 건네 수량이 어긋난다) */
-  const expiredMask = expired && !masked;
   const prizeOf = (rank: Rank) => t.prize[`rank${rank}` as const];
   const prize = r?.rank ? prizeOf(r.rank) : "";
   // 결과가 나와도 바로 보여주지 않는다. "결과 보기"를 눌러 상자를 열어야(Reveal) 당첨 여부가 공개된다. 한 번 본 뒤에는 바로 보여준다
@@ -821,11 +819,8 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
   const [revealing, setRevealing] = useState(false);
   const pending = drawn && !seen;
   const won = !!(drawn && seen && r?.rank);
-  // 1~3등이 아니면 "마스크팩 당첨"으로 보여준다. 마스크팩도 수량이 한정돼 있어 똑같이 QR 로 확인하고 준다
-  const maskWin = !!(drawn && seen && r && !r.rank);
-  const maskPrize = t.prize.mask;
-  /** "마스크팩 당첨". 예전엔 "4등 당첨"이었는데 등수보다 받는 물건이 바로 읽히게 바꿨다 */
-  const maskWinLine = fmt(h.wonBig, { rank: maskPrize });
+  /** 1~3등이 아님. 상자를 열어 본 뒤에는 추첨 카드 자리에 감사 인사와 결과 한 줄만 남긴다 (받을 것이 없어 QR 도 없다) */
+  const lost = !!(drawn && seen && r && !r.rank);
   /** 오늘이면 시각만, 다른 날이면 날짜까지 */
   const when = (iso: string) => (dayKey(new Date(iso)) === dayKey(new Date()) ? hhmm(iso) : dateTime(iso));
 
@@ -840,8 +835,8 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
   useEffect(() => trackViews("done", () => ({ raffle: stateRef.current })), []);
   // 분석: 결과 상자를 열어 당첨 결과를 처음 본 순간 (참가자·회차당 1번)
   useEffect(() => {
-    if (won || maskWin) trackOnce(`tp_seen_${p.seq}_${r?.round_name ?? ""}`, "result_seen", "done", { rank: r?.rank ?? null });
-  }, [won, maskWin, p.seq, r?.round_name, r?.rank]);
+    if (won || lost) trackOnce(`tp_seen_${p.seq}_${r?.round_name ?? ""}`, "result_seen", "done", { rank: r?.rank ?? null });
+  }, [won, lost, p.seq, r?.round_name, r?.rank]);
 
   // 전광판에 떠 있는 동안만 /api/me 를 자주 불러 줄 번호를 따라간다. 전광판 줄 수만큼의 사람에게만 해당돼 부하가 작다
   const onBoardNow = me.board != null;
@@ -867,8 +862,8 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
   let title: string;
   let sub: React.ReactNode;
   if (r?.drawn) {
-    title = r.rank ? fmt(t.done.won, { rank: rankName(r.rank), prize }) : maskWinLine;
-    sub = !r.rank ? t.done.lostDetail
+    title = r.rank ? fmt(t.done.won, { rank: rankName(r.rank), prize }) : h.lostTitle;
+    sub = !r.rank ? h.lostLine
       : rankClaimed ? <span className="ok">{t.done.prizeClaimed}</span>
       : expired ? h.expiredLine
       : <>{h.wonSub}{round?.claim_until && <> {fmt(h.claimUntil, { time: when(round.claim_until) })}</>}</>;
@@ -885,8 +880,8 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
     sub = h.drawingSubSoon;
   }
 
-  // 수령 QR 은 발표 후 아직 경품(1~3등 또는 마스크팩)을 안 받았을 때만. 발표 전에 "직원에게 보여주세요"는 뜬금없다
-  const showQr = (won && !rankClaimed && !expired) || (won && expiredMask) || (maskWin && !masked);
+  // 수령 QR 은 1~3등에 당첨돼 아직 경품을 안 받았을 때만. 발표 전에 "직원에게 보여주세요"는 뜬금없다
+  const showQr = won && !rankClaimed && !expired;
   const qrUrl = `${typeof window === "undefined" ? "" : window.location.origin}/admin?qr=${me.qr}`;
   const [qrOpen, setQrOpen] = useState(false);
   useEffect(() => {
@@ -923,7 +918,6 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
     return () => clearTimeout(id);
   }, [svOpen, svDeadline]);
   const svDoubled = !!sv && !drawn && sv.done;
-  const maskNote = masked && <p className="sub ok" style={{ marginTop: "var(--s2)" }}>{t.done.maskClaimed}</p>;
   // 발표 화면은 모집·추첨 중에도 지난 회차 당첨번호를 볼 수 있게 늘 연다. 단 결과가 나왔는데 아직 상자를 안 열었으면(pending) 결과가 미리 보이므로 숨긴다
   const resultsLink = !pending && <a href="/results" className={`btn ghost ${s.cta}`} style={{ display: "block", textAlign: "center", textDecoration: "none" }}>{t.done.results}</a>;
 
@@ -967,39 +961,20 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
         <div className={`card ${s.hero} ${s.rise}`}>
           <h1 className={s.wonBig}>{fmt(h.wonBig, { rank: rankName(r!.rank!) })}</h1>
           {rankClaimed ? <p className={`${s.wonLine} ok`}>{t.done.prizeClaimed}</p> : <p className={s.wonLine}>{expired ? h.expiredLine : h.wonLine}</p>}
-          {expired && <Fold shut={masked}><p className={s.sub}>{h.expiredMask}</p></Fold>}
           {/* 수령하면 장소·기한·QR 버튼은 필요 없어진다. 접어서 아래 내용이 부드럽게 올라오게 한다 */}
           <dl className={s.facts}>
             <div><dt>{h.factPrize}</dt><dd>{prize}</dd></div>
-            <Fold shut={rankClaimed || (expired && masked)}><div><dt>{h.factPlace}</dt><dd>{h.factPlaceValue}</dd></div></Fold>
+            <Fold shut={rankClaimed || expired}><div><dt>{h.factPlace}</dt><dd>{h.factPlaceValue}</dd></div></Fold>
             {round?.claim_until && <Fold shut={rankClaimed}><div><dt>{h.factUntil}</dt><dd>{fmt(h.factUntilValue, { time: when(round.claim_until) })}</dd></div></Fold>}
           </dl>
           <Fold shut={!showQr}>
             <button type="button" className={`btn ${s.cta}`} onClick={() => setQrOpen(true)}>{h.qrButton}</button>
           </Fold>
-          {maskNote}
           {resultsLink}
         </div>
       )}
 
-      {maskWin && (
-        // 마스크팩 당첨: 등수 당첨과 같은 틀. 수량이 한정이라 "수량" 줄을 더한다
-        <div className={`card ${s.hero} ${s.rise}`}>
-          <h1 className={s.wonBig}>{maskWinLine}</h1>
-          {masked ? <p className={`${s.wonLine} ok`}>{t.done.prizeClaimed}</p> : <p className={s.wonLine}>{h.wonLine}</p>}
-          <dl className={s.facts}>
-            {/* 제목이 이미 "마스크팩 당첨"이라 경품 줄은 두지 않는다 */}
-            <Fold shut={masked}><div><dt>{h.factQty}</dt><dd>{h.factQtyLimited}</dd></div></Fold>
-            <Fold shut={masked}><div><dt>{h.factPlace}</dt><dd>{h.factPlaceValue}</dd></div></Fold>
-          </dl>
-          <Fold shut={!showQr}>
-            <button type="button" className={`btn ${s.cta}`} onClick={() => setQrOpen(true)}>{h.qrButton}</button>
-          </Fold>
-          {resultsLink}
-        </div>
-      )}
-
-      {!won && !maskWin && (
+      {!won && (
         <div className={`card ${s.hero} ${s.rise} ${onBoard ? s.underBoard : ""}`}>
           <p className={s.raffleNo}>{h.raffleNo}<b>{seq4}</b>{svDoubled && <span className={s.x2}>{h.surveyApplied}</span>}</p>
           {pending ? (
@@ -1025,7 +1000,6 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
             <p className={s.prizeLine}>{ranks.map((k) => `${rankName(k)} ${prizeOf(k)}`).join(" · ")}</p>
           )}
           {onsiteNote}
-          {maskNote}
           {/* 발표 전에는 누를 일이 드물어서 버튼이 아니라 작은 링크로 둔다 */}
           {!pending && <a href="/results" className={s.quietLink}>{t.done.results}</a>}
         </div>
@@ -1038,8 +1012,10 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
       <TpLinks quiet />
 
       {revealing && r && (
-        <Reveal rank={r.rank ?? "mask"} okLabel={h.revealOk} title={h.revealCongrats}
-          line={r.rank ? `${rankName(r.rank)} · ${prizeOf(r.rank)}` : maskWinLine}
+        // 당첨이면 경품과 꽃가루. 미당첨, 그리고 기한이 지나 취소된 당첨은 상자만 조용히 열린다 (취소된 당첨에 "축하해요"를 띄우지 않는다)
+        <Reveal rank={expired ? null : r.rank} okLabel={h.revealOk}
+          title={!r.rank ? h.lostTitle : expired ? fmt(h.wonBig, { rank: rankName(r.rank) }) : h.revealCongrats}
+          line={!r.rank ? h.lostLine : expired ? h.expiredLine : `${rankName(r.rank)} · ${prizeOf(r.rank)}`}
           onDone={() => { if (!preview) safeSet("local", REVEAL_KEY, String(p.seq)); setSeen(true); setRevealing(false); }} />
       )}
 
@@ -1055,7 +1031,7 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
 
       {qrOpen && (
         <QrSheet value={qrUrl} label={h.showCode} closeLabel={h.close} noLabel={h.raffleNo} no={seq4}
-          caption={won ? (expired ? maskPrize : `${rankName(r!.rank!)} · ${prize}`) : maskWin ? maskWinLine : p.display_name} closing={won ? (expired ? masked : rankClaimed) : maskWin && masked} onClose={() => setQrOpen(false)} />
+          caption={won ? `${rankName(r!.rank!)} · ${prize}` : p.display_name} closing={won && (rankClaimed || expired)} onClose={() => setQrOpen(false)} />
       )}
     </>
   );

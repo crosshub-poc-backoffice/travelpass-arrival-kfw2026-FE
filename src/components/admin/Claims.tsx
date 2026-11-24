@@ -112,7 +112,6 @@ export default function Claims({ scan }: { scan?: string | null }) {
   }
 
   const p = data?.participant;
-  const mask = data?.claims.find((c) => c.prize_type === "mask");
   const rankType = data?.raffle?.rank ? (`rank${data.raffle.rank}` as PrizeType) : null;
   const rankClaim = rankType ? data?.claims.find((c) => c.prize_type === rankType) : undefined;
 
@@ -165,10 +164,9 @@ export default function Claims({ scan }: { scan?: string | null }) {
             </div>
           </div>
 
-          <div className="card" style={{ maxWidth: "none" }}>
-            {data.raffle?.drawn || mask
-              ? <ClaimRow label={PRIZE_LABEL.mask} sub="등록 참가자 전원" claim={mask} onClaim={() => doClaim("mask")} onUnclaim={() => doUnclaim("mask")} />
-              : <p className="sub">경품은 추첨 발표 뒤에 드려요.</p>}
+          {/* 미당첨은 위 추첨 상태에 이미 나와 있고 드릴 것이 없어 이 칸을 두지 않는다 */}
+          {(!data.raffle?.drawn || rankType) && <div className="card" style={{ maxWidth: "none" }}>
+            {!data.raffle?.drawn && <p className="sub">경품은 추첨 발표 뒤에 드려요.</p>}
             {rankType && data.raffle?.expired && (
               <div className="block">
                 <b>{PRIZE_LABEL[rankType]}</b>
@@ -176,8 +174,7 @@ export default function Claims({ scan }: { scan?: string | null }) {
               </div>
             )}
             {rankType && !data.raffle?.expired && <ClaimRow key={`${p.id}-${rankType}`} label={PRIZE_LABEL[rankType]} sub={`${data.raffle!.round_name} 당첨`} claim={rankClaim} onClaim={() => doClaim(rankType)} onUnclaim={() => doUnclaim(rankType)} />}
-            {!rankType && data.raffle?.drawn && <p className="sub" style={{ marginTop: 10 }}>1~3등 경품은 당첨자에게만 표시돼요.</p>}
-          </div>
+          </div>}
 
           {data.logs.length > 0 && (
             <div className="card" style={{ maxWidth: "none" }}>
