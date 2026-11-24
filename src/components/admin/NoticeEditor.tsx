@@ -47,7 +47,7 @@ export default function NoticeEditor() {
         {notice && <span className="tag g">게시 중 · {fmtDateTime(notice.at)}</span>}
       </div>
       <textarea className="input" rows={3} maxLength={MAX} value={text} disabled={notice === undefined}
-        placeholder="예: 마스크팩이 모두 소진됐어요. 참여해 주셔서 감사합니다." onChange={(e) => setText(e.target.value)} style={{ resize: "vertical", minHeight: 80 }} />
+        placeholder="예: 오후 추첨은 17시에 발표해요. 당첨되면 30분 안에 부스로 와 주세요." onChange={(e) => setText(e.target.value)} style={{ resize: "vertical", minHeight: 80 }} />
       <div className="inline" style={{ marginTop: 10, width: "100%" }}>
         <button className="btn sm" type="button" disabled={busy || !trimmed || !changed} onClick={() => save(text)}>{notice ? "고쳐 올리기" : "올리기"}</button>
         {notice && <button className="btn ghost sm" type="button" disabled={busy} onClick={() => { setErr(null); setConfirmClear(true); }}>내리기</button>}

@@ -49,13 +49,12 @@ export default function Stats() {
           <div className="stat"><div className="k">누적 입국</div><div className="v">{s.total.toLocaleString()}</div></div>
           <div className="stat"><div className="k">국내 / 해외 / 직접입력</div><div className="v">{s.domestic}<small>/ {s.overseas} / {s.other}</small></div></div>
           <div className="stat"><div className="k">마케팅 동의</div><div className="v">{s.marketing}<small>{s.total ? Math.round((s.marketing / s.total) * 100) : 0}%</small></div></div>
-          <div className="stat"><div className="k">마스크팩 수령</div><div className="v">{claimed("mask")}<small>/ {s.total}</small></div></div>
+          <div className="stat"><div className="k">TV 숨김</div><div className="v">{s.hidden}</div></div>
         </div>
-        <div className="grid4">
+        <div className="grid4 three">
           {([1, 2, 3] as Rank[]).map((r) => (
             <div className="stat" key={r}><div className="k">{r}등 {PRIZES[r].name} 수령</div><div className="v">{claimed(`rank${r}`)}<small>/ {s.winners.find((w) => w.rank === r)?.count ?? 0} 당첨</small></div></div>
           ))}
-          <div className="stat"><div className="k">TV 숨김</div><div className="v">{s.hidden}</div></div>
         </div>
       </div>
       <div className="grid2">

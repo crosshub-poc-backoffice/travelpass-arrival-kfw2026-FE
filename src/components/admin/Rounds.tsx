@@ -149,7 +149,7 @@ export default function Rounds() {
                 <TimePicker id="round-announce" days={days} optional value={form.announce} suggest={form.cutoff || `${defaultDay()}T13:00`} onChange={(v) => setForm((f) => ({ ...f, announce: v }))} />
               </div>
               <div className="sub field-col">
-                <InfoTip label="수령 기한" htmlFor="round-claim" title="수령 기한 안내" align="right">이 시각까지 1~3등 경품을 안 받아 가면 당첨이 자동으로 취소되고, 경품은 재고로 돌아가 다음 회차에 다시 걸 수 있어요. 비워 두면 기한이 없어요. 마스크팩은 기한과 상관없이 받을 수 있어요.</InfoTip>
+                <InfoTip label="수령 기한" htmlFor="round-claim" title="수령 기한 안내" align="right">이 시각까지 1~3등 경품을 안 받아 가면 당첨이 자동으로 취소되고, 경품은 재고로 돌아가 다음 회차에 다시 걸 수 있어요. 비워 두면 기한이 없어요.</InfoTip>
                 <TimePicker id="round-claim" days={days} optional value={form.claim} suggest={`${form.cutoff ? form.cutoff.slice(0, 10) : defaultDay()}T18:00`} onChange={(v) => setForm((f) => ({ ...f, claim: v }))} />
               </div>
             </div>

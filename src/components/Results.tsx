@@ -14,10 +14,10 @@ interface Data { rounds: RoundResult[]; next: { name: string; cutoff_at: string 
 /** /api/me: 이 브라우저에 보딩패스 쿠키가 있으면 본인 결과와 내가 속한 회차가 온다 */
 interface Me {
   participant: { seq: number; display_name: string } | null;
-  raffle: { drawn: boolean; round_name: string | null; rank: Rank | null } | null;
+  raffle: { drawn: boolean; round_name: string | null; rank: Rank | null; expired?: boolean } | null;
   round: { id: number; name: string; state: "open" | "drawing" | "announced"; cutoff_at: string; announce_at: string | null } | null;
 }
-interface Check { seq: number; drawn: boolean; round_name: string | null; rank: Rank | null }
+interface Check { seq: number; drawn: boolean; round_name: string | null; rank: Rank | null; expired?: boolean }
 
 const seq4 = (n: number) => String(n).padStart(4, "0");
 
@@ -53,9 +53,9 @@ export default function Results() {
   }
 
   const prizeOf = (r: Rank) => t.prize[`rank${r}` as const];
-  /** 추첨 대기 / N등 당첨 / 마스크팩 당첨 한 줄 */
+  /** 추첨 대기 / N등 당첨 / 미당첨 한 줄 */
   const statusLine = (s: { drawn: boolean; round_name: string | null; rank: Rank | null }) =>
-    !s.drawn ? t.done.waiting : s.rank ? fmt(t.done.won, { rank: rankName(s.rank), prize: prizeOf(s.rank) }) : fmt(t.home.wonBig, { rank: t.prize.mask });
+    !s.drawn ? t.done.waiting : s.rank ? fmt(t.done.won, { rank: rankName(s.rank), prize: prizeOf(s.rank) }) : t.done.lost;
 
   // 회차마다 상자 하나. 내 회차를 맨 위에 펼쳐 두고, 다른 회차는 최신순으로 접어 둔다 (등록 안 한 사람에게는 가장 최근 회차를 펼친다)
   const my = me?.participant ? me.round : null;
@@ -104,8 +104,10 @@ export default function Results() {
         <div className={`card ${g.mine}`}>
           <div className={g.label}>{t.home.raffleNo}</div>
           <div className={g.no}>{seq4(me.participant.seq)}</div>
-          <div className={`${g.head} ${me.raffle?.drawn ? g.win : ""}`}>{statusLine(me.raffle ?? { drawn: false, round_name: null, rank: null })}</div>
-          {me.raffle?.drawn && <p className={g.body}>{me.raffle.rank ? t.results.wonHint : t.done.lostDetail}</p>}
+          {/* 미당첨은 완료 화면과 같은 말로: 감사 인사를 크게, 결과는 그 아래 한 줄 */}
+          <div className={`${g.head} ${me.raffle?.rank && !me.raffle.expired ? g.win : ""}`}>{me.raffle?.drawn && !me.raffle.rank ? t.home.lostTitle : statusLine(me.raffle ?? { drawn: false, round_name: null, rank: null })}</div>
+          {/* 수령 기한이 지나 취소된 당첨에 "받아가세요"를 띄우지 않는다 */}
+          {me.raffle?.drawn && <p className={g.body}>{!me.raffle.rank ? t.home.lostLine : me.raffle.expired ? t.home.expiredLine : t.results.wonHint}</p>}
         </div>
       ) : (
         <form className="card" onSubmit={doCheck}>
@@ -118,8 +120,8 @@ export default function Results() {
           {check && "error" in check && <div className="alert" style={{ marginTop: 12 }}>{check.error}</div>}
           {check && !("error" in check) && (
             <div>
-              <div className={`${g.head} ${check.drawn ? g.win : ""}`}>#{check.seq} · {statusLine(check)}</div>
-              {check.drawn && <p className={g.body}>{check.rank ? t.results.wonHint : t.done.lostDetail}</p>}
+              <div className={`${g.head} ${check.rank && !check.expired ? g.win : ""}`}>#{check.seq} · {statusLine(check)}</div>
+              {check.drawn && <p className={g.body}>{!check.rank ? t.home.lostTitle : check.expired ? t.home.expiredLine : t.results.wonHint}</p>}
             </div>
           )}
         </form>
