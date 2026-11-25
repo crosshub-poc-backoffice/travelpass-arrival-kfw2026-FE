@@ -32,7 +32,7 @@ export const PRIZES: Record<Rank, { name: string; stock: number }> = {
  */
 export const DRAW_TIMES = ["13:00", "17:00"];
 /** 추첨 후 전광판이 당첨자 화면으로 바뀌어 있는 시간 */
-export const WINNERS_SHOW_MS = 10 * 60 * 1000;
+export const WINNERS_SHOW_MS = 5 * 60 * 1000;
 
 /** 1~3등 수령 기한 = 발표 후 이 시간. 현장에 있는 사람만 받게 짧게 둔다 (회차별로 콘솔에서 고칠 수 있다) */
 export const CLAIM_WINDOW_MIN = 30;
