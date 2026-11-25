@@ -35,7 +35,7 @@ const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 const FRESH_MS = 15000;
 /** 당첨자 화면에서 한 페이지(BOARD_ROWS 명) 보여주는 시간 */
 const PAGE_MS = 8000;
-/** ?test 의 가짜 당첨 발표가 떠 있는 시간 (실제는 서버 WINNERS_SHOW_MS) */
+/** ?test 의 가짜 당첨 발표가 떠 있는 시간 (실제는 서버 WINNERS_SHOW_SEC) */
 const TEST_WINNERS_MS = 60000;
 const RANK_LABEL: Record<number, string> = { 1: "🏆 1ST", 2: "2ND", 3: "3RD" };
 /** 추첨 직후 당첨자를 띄우기 전에 이름을 돌리며 뜸을 들이는 시간 */
