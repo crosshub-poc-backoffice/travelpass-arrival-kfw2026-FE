@@ -6,7 +6,7 @@ import { EMOJI_PALETTE, NAME_EMOJI_MAX, cells, emojiSrc, originFlag, paletteEmoj
 import { MESSAGES, fmt } from "@/lib/i18n";
 import { filterName } from "@/lib/validation";
 import MiniBoard, { MINI_WIDTH } from "@/components/register/MiniBoard";
-import NameBoardInput from "@/components/register/NameBoardInput";
+import NameBoardInput from "./KingNameInput";
 import s from "@/components/register/register.module.css";
 
 const w = MESSAGES.ko.wizard;

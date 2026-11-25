@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NAME_MAX, SURVEY_COUNT, TZ, hhmm, type PrizeType, type Rank } from "@/lib/config";
 import { FROM_WIDTH, ORIGIN_OTHER } from "@/lib/origins";
 import { filterName, nameLength, normalizeName, normalizeText, validateEmail, validateName } from "@/lib/validation";
@@ -10,7 +11,7 @@ import { COUNTRIES, KOREA, OTHER, REGIONS, isRegion, placeName } from "@/lib/geo
 import { LANGS, LANG_LABEL, MESSAGES, isLang, rankLabel, type Lang, type Messages } from "@/lib/i18n";
 import { LangSwitcher, useI18n } from "./i18n-client";
 import Globe, { type GlobePin } from "./register/Globe";
-import MiniBoard, { MINI_WIDTH } from "./register/MiniBoard";
+import { MINI_WIDTH } from "./register/MiniBoard";
 import NameBoardInput from "./register/NameBoardInput";
 import Countdown from "./register/Countdown";
 import QrSheet from "./register/QrSheet";
@@ -26,8 +27,6 @@ import TpLinks from "./TpLinks";
 const LEGACY_TOKEN_KEY = "tp_arrival_token";
 /** I18nProvider 가 고른 언어를 저장하는 키. 값이 있으면 언어 선택 화면을 건너뛴다 */
 const LANG_KEY = "tp_lang";
-/** 전광판에 떠 있는 동안: 새 손님이 오면 내 줄이 한 칸씩 내려가므로 줄 번호가 늦지 않게 자주 확인한다 */
-const BOARD_POLL_MS = 3000;
 const DRAFT_KEY = "tp_arrival_draft";
 /** 추첨 결과 공개 연출을 이미 본 참가자 번호. 한 번 본 뒤에는 결과 화면을 바로 보여준다 */
 const REVEAL_KEY = "tp_reveal_seen";
@@ -338,7 +337,7 @@ function Wizard({ draft, patch, langToggle, onLangStep, onDuplicate, onDone }: W
   }
 
   return (
-    <form className={`card ${s.wizard}`} onSubmit={next} noValidate>
+    <form id={WIZARD_FORM} className={`card ${s.wizard} ${draft.step === "name" ? s.tight : ""}`} onSubmit={next} noValidate>
       <div className={s.bar}>
         <button type="button" className={s.back} onClick={back} aria-label={w.back}>←</button>
         <div className={s.progress} role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={idx + 1}>
@@ -365,17 +364,19 @@ function Wizard({ draft, patch, langToggle, onLangStep, onDuplicate, onDone }: W
             {!err && draft.email && !validateEmail(draft.email).ok && <div className={s.hint}>{w.emailHint}</div>}
           </>
         )}
-        {draft.step === "name" && <NameStep draft={draft} patch={patch} invalid={!!err} />}
+        {draft.step === "name" && <NameStep draft={draft} patch={patch} err={err} onEdit={() => setErr(null)} busy={busy} />}
         {draft.step === "consent" && (
           <ConsentStep
             values={[cPrivacy, cDisplay, cMarketing]} setters={[setCPrivacy, setCDisplay, setCMarketing]} />
         )}
 
-        {err && <div className={s.err} role="alert">{err}</div>}
+        {/* 이름 단계의 오류는 입력칸 바로 아래에 보여준다 (여기에 두면 화면 아래 자판에 가린다) */}
+        {err && draft.step !== "name" && <div className={s.err} role="alert">{err}</div>}
 
-        {draft.step !== "quiz" && (
+        {/* 이름 단계의 "다음"은 화면 아래 자판 안에 있다 (NameStep) */}
+        {draft.step !== "quiz" && draft.step !== "name" && (
           <button className={`btn ${s.cta}`} type="submit" disabled={busy || !canNext(draft, cPrivacy && cDisplay)}>
-            {draft.step === "consent" ? (busy ? t.register.submitting : t.register.submit) : w.next}
+            {draft.step === "consent" ? (busy ? t.register.submitting : t.register.submit) : draft.step === "origin" && !originReady(draft) ? (draft.origin === ORIGIN_OTHER ? w.next : inKoreaDraft(draft) ? w.originPickRegion : w.originPick) : w.next}
           </button>
         )}
         {draft.step === "consent" && <div className={s.hint} style={{ textAlign: "center" }}>{w.oncePerPerson}</div>}
@@ -391,6 +392,8 @@ function Wizard({ draft, patch, langToggle, onLangStep, onDuplicate, onDone }: W
 function originReady(d: Draft) {
   return !!d.origin && (d.origin !== ORIGIN_OTHER || normalizeText(d.originText).length >= 2);
 }
+
+const inKoreaDraft = (d: Draft) => d.country === KOREA.code;
 
 function canNext(d: Draft, consented: boolean) {
   switch (d.step) {
@@ -448,7 +451,7 @@ function OriginStep({ draft, patch, invalid }: StepProps & { invalid: boolean })
         </>
       ) : (
         <div className={s.strip} ref={strip}>
-          <button type="button" className={`${s.chip} ${s.home}`} data-code={KOREA.code} onClick={() => pick(KOREA.code)}>{KOREA.flag} {name(KOREA.code)}</button>
+          <button type="button" className={s.chip} data-code={KOREA.code} onClick={() => pick(KOREA.code)}>{KOREA.flag} {name(KOREA.code)}</button>
           {[...COUNTRIES, OTHER].map((c) => (
             <button key={c.code} type="button" data-code={c.code} className={`${s.chip} ${draft.country === c.code ? s.on : ""}`} aria-pressed={draft.country === c.code}
               onClick={() => pick(c.code)}>{c.flag} {name(c.code)}</button>
@@ -497,122 +500,183 @@ function PhoneStep({ draft, patch, invalid }: StepProps & { invalid: boolean }) 
   );
 }
 
-/** 키보드 위로 실제 보이는 영역 (visualViewport). 지원 안 하면 null */
-function useVisibleArea(active: boolean) {
-  const [area, setArea] = useState<{ top: number; height: number } | null>(null);
-  useEffect(() => {
-    const vv = typeof window !== "undefined" ? window.visualViewport : null;
-    if (!active || !vv) { setArea(null); return; }
-    const update = () => setArea({ top: vv.offsetTop, height: vv.height });
-    update();
-    vv.addEventListener("resize", update);
-    vv.addEventListener("scroll", update);
-    return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
-  }, [active]);
-  return area;
-}
-
-const HANGUL = /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/;
-const PICTO = /\p{Extended_Pictographic}|[\u{1F1E6}-\u{1F1FF}]/u;
+/** 이름 단계의 자판은 form 밖(body)에 그려지므로 "다음"·Enter 를 이 id 로 폼에 잇는다 */
+const WIZARD_FORM = "wizard-form";
+/** 숫자 줄은 없다: 이름에 숫자를 넣는 사람이 없었고, 그 자리를 이모지에 준다 */
+const KEY_ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"] as const;
+/** 이모지 격자: 8칸 × 4줄을 늘 전부 보여준다. 한 줄 높이는 입력칸과 자판 사이에 남는 자리에 맞춰 줄이거나 키운다 */
+const EMOJI_ROWS = Math.ceil(EMOJI_PALETTE.length / 8);
+const EMOJI_GAP = 6;
+const EMOJI_ROW_MIN = 22;
+const EMOJI_ROW_MAX = 64;
+/** 본문 아래 여백(.plain 의 아래 padding). 자판 높이만큼 비울 때 이만큼은 이미 비어 있어서 뺀다 (안 빼면 화면이 살짝 스크롤된다) */
+const PAGE_BOTTOM_PAD = 40;
 
 /**
- * 이름 단계. 들어올 땐 키보드를 띄우지 않아 미리보기·입력칸·팔레트가 한 화면에 보인다.
- * 입력칸을 누르면 키보드 위 보이는 영역(없으면 화면 위 절반)을 입력칸 + 이모지로만 채운다 (.nameSheet).
- * 같은 input 을 그대로 쓰고 감싼 상자만 바꿔서 포커스가 끊기지 않게 한다.
+ * 이름 단계. 기기 키보드를 쓰지 않고 화면 아래에 붙은 자체 영문 자판으로만 입력한다.
+ * - 전광판은 영문·숫자만 나오므로 한글 자판이 뜰 일을 아예 없앤다.
+ * - "입력 모드"가 따로 없어서 빠져나올 일도 없다: 자판 맨 아래의 "다음"이 곧 완료.
+ * - 입력 상태가 기본이다: 미리보기(FROM 줄)·설명·PASSENGER 표시 없이 제목 → 입력칸 → 이모지 → 자판만 둔다.
  */
-function NameStep({ draft, patch, invalid }: StepProps & { invalid: boolean }) {
+function NameStep({ draft, patch, err, onEdit, busy }: StepProps & { err: string | null; onEdit: () => void; busy: boolean }) {
   const { t, fmt } = useI18n();
   const w = t.wizard;
-  const input = useRef<HTMLInputElement>(null);
-  /** 마지막 커서 위치. 팔레트를 누르다 키보드가 내려가 포커스를 잃어도 이 자리에 넣는다 */
-  const caret = useRef<number | null>(null);
-  /** 걸러낸 뒤 되돌릴 커서 (대문자 변환·문자 제거로 값이 바뀌면 커서가 끝으로 튀는 걸 막는다) */
-  const pendingCaret = useRef<number | null>(null);
-  const [focused, setFocused] = useState(false);
-  const [caretAt, setCaretAt] = useState<number | null>(null);
-  const [notice, setNotice] = useState<"" | "latin" | "emoji">("");
-  const noticeTimer = useRef<number | null>(null);
-  const area = useVisibleArea(focused);
+  /** 방금 넣은 값·커서. 빠르게 연달아 눌러도 앞 입력이 반영된 값에서 이어 가게 한다 */
+  const val = useRef(draft.name);
+  val.current = draft.name;
+  const [caretAt, setCaretAt] = useState(draft.name.length);
+  const caret = useRef(caretAt);
+  const emojiBox = useRef<HTMLDivElement>(null);
+  /** 이모지 한 줄 높이 (입력칸과 자판 사이에 남는 자리를 4줄로 나눈 값) */
+  const [emojiRow, setEmojiRow] = useState(40);
+  const pad = useRef<HTMLDivElement>(null);
+  const [padH, setPadH] = useState(0);
 
-  const shown = normalizeName(draft.name);
   const cur = cells(draft.name);
-  const full = cur.filter((g) => paletteEmoji(g)).length >= NAME_EMOJI_MAX || cur.length >= NAME_MAX;
+  const emojiFull = cur.filter((g) => paletteEmoji(g)).length >= NAME_EMOJI_MAX;
+  const full = cur.length >= NAME_MAX;
+
+  const editRef = useRef(onEdit);
+  editRef.current = onEdit;
+  const apply = useCallback((next: string, pos: number) => {
+    val.current = next;
+    caret.current = pos;
+    setCaretAt(pos);
+    patch({ name: next });
+    // 고치기 시작하면 오류 표시를 지운다
+    editRef.current();
+  }, [patch]);
+
+  /** 커서 자리에 글자(또는 팔레트 이모지)를 넣는다 */
+  const type = useCallback((ch: string) => {
+    const v = val.current;
+    // 칸이 다 찼으면 받지 않는다 (중간에 끼워 넣으면 맨 끝 글자가 말없이 잘려 나간다)
+    if (cells(v).length >= NAME_MAX) return;
+    const at = Math.min(v.length, caret.current);
+    const next = filterName(v.slice(0, at) + ch + v.slice(at));
+    if (next === v) return;
+    apply(next, Math.min(next.length, filterName(v.slice(0, at) + ch).length));
+  }, [apply]);
+
+  /** 커서 앞 한 칸을 지운다 (이모지도 한 칸). 길게 눌러도 한 번에 한 칸만: 이어서 지우면 천천히 누르는 사람은 다 지워 버린다 */
+  const erase = useCallback(() => {
+    const v = val.current;
+    const at = Math.min(v.length, caret.current);
+    const before = cells(v.slice(0, at));
+    if (!before.length) return;
+    const head = before.slice(0, -1).join("");
+    const next = filterName(head + v.slice(at));
+    apply(next, Math.min(next.length, head.length));
+  }, [apply]);
+
+  const move = useCallback((d: -1 | 1) => {
+    const v = val.current;
+    const before = cells(v.slice(0, Math.min(v.length, caret.current)));
+    const all = cells(v);
+    const n = Math.max(0, Math.min(all.length, before.length + d));
+    const pos = all.slice(0, n).join("").length;
+    caret.current = pos;
+    setCaretAt(pos);
+  }, []);
+
+  // 노트북·외장 키보드: 한글 입력 상태여도 자판 위치(code)로 영문을 넣는다
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      const letter = /^Key([A-Z])$/.exec(e.code)?.[1];
+      const digit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code)?.[1];
+      if (letter) type(letter);
+      else if (digit && !e.shiftKey) type(digit);
+      else if (e.code === "Space") type(" ");
+      else if (e.key === "." || e.key === "-") type(e.key);
+      else if (e.key === "Backspace") erase();
+      else if (e.key === "ArrowLeft") move(-1);
+      else if (e.key === "ArrowRight") move(1);
+      else if (e.key === "Enter") { (document.getElementById(WIZARD_FORM) as HTMLFormElement | null)?.requestSubmit(); }
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [type, erase, move]);
+
+  // 자판이 화면 아래에 떠 있으므로 그 높이만큼 본문 아래를 비워 둔다
+  useLayoutEffect(() => {
+    const el = pad.current;
+    if (!el) return;
+    const update = () => setPadH(el.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
-    const el = input.current;
-    if (el && pendingCaret.current !== null && document.activeElement === el) {
-      try { el.setSelectionRange(pendingCaret.current, pendingCaret.current); } catch {}
-    }
-    if (pendingCaret.current !== null) setCaretAt(pendingCaret.current);
-    pendingCaret.current = null;
-  }, [draft.name]);
-  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current); }, []);
+    const measure = () => {
+      const el = emojiBox.current;
+      if (!el || !padH) return;
+      const free = window.innerHeight - padH - (el.getBoundingClientRect().top + window.scrollY) - 12;
+      const row = Math.floor((free - (EMOJI_ROWS - 1) * EMOJI_GAP) / EMOJI_ROWS);
+      setEmojiRow(Math.max(EMOJI_ROW_MIN, Math.min(row, EMOJI_ROW_MAX)));
+    };
+    measure();
+    // 화면 크기·주소창 접힘·회전: 배치가 끝난 다음 프레임에 다시 잰다
+    let raf = 0;
+    const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
+    window.addEventListener("resize", later);
+    const ro = new ResizeObserver(later);
+    ro.observe(document.documentElement);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", later); ro.disconnect(); };
+  // 제목 줄 수(언어)나 오류 줄이 바뀌면 이모지가 놓이는 자리가 달라지므로 다시 잰다
+  }, [padH, err, w.nameTitle]);
 
-  const flash = (n: "latin" | "emoji") => {
-    setNotice(n);
-    if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = window.setTimeout(() => setNotice(""), 3500);
-  };
-
-  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value;
-    const at = e.target.selectionStart ?? raw.length;
-    const next = filterName(raw);
-    // 걸러진 글자 안내: 한글(전광판은 영문만) / 팔레트 밖 이모지
-    if (HANGUL.test(raw)) flash("latin");
-    else if (cells(raw).some((g) => PICTO.test(g) && !paletteEmoji(g))) flash("emoji");
-    const pos = Math.min(next.length, filterName(raw.slice(0, at)).length);
-    pendingCaret.current = pos;
-    caret.current = pos;
-    patch({ name: next });
-  };
-
-  /** 팔레트 이모지를 커서 자리에 끼워 넣는다 (커서를 둔 적 없으면 끝) */
-  const insert = (em: string) => {
-    const el = input.current;
-    const v = draft.name;
-    const live = el && document.activeElement === el;
-    const at = Math.min(v.length, live ? (el!.selectionStart ?? v.length) : (caret.current ?? v.length));
-    const end = Math.min(v.length, live ? (el!.selectionEnd ?? at) : at);
-    const next = filterName(v.slice(0, at) + em + v.slice(end));
-    const pos = Math.min(next.length, filterName(v.slice(0, at) + em).length);
-    pendingCaret.current = pos;
-    caret.current = pos;
-    patch({ name: next });
-  };
-
-  const noticeText = notice === "latin" ? w.nameOnlyLatin : notice === "emoji" ? w.nameEmojiPalette : "";
-
-  const caretCell = focused ? Math.min(MINI_WIDTH - 1, cells(draft.name.slice(0, caretAt ?? draft.name.length)).length) : null;
-
+  const caretCell = Math.min(MINI_WIDTH - 1, cells(draft.name.slice(0, Math.min(draft.name.length, caretAt))).length);
+  /** 누르는 즉시 입력 (click 을 기다리지 않는다). 마우스는 왼쪽 버튼만 */
+  const press = (fn: () => void) => (e: React.PointerEvent) => { if (e.button > 0) return; e.preventDefault(); fn(); };
+  const ready = nameLength(normalizeName(draft.name)) >= 2;
   return (
     <>
       <h1 className={s.h}>{w.nameTitle}</h1>
-      <p className={s.sub}>{w.nameSub}</p>
-      <MiniBoard rows={[
-        { label: "FROM", text: (() => { const code = draft.origin === ORIGIN_OTHER ? normalizeText(draft.originText) : draft.origin; return originFlag(code) + code; })() },
-      ]} />
-      {/* PASSENGER 줄이 곧 입력칸. 누르면 키보드 위 보이는 영역을 이 줄 + 이모지로만 채운다 */}
-      <div className={focused ? s.nameSheet : undefined}
-        style={focused ? (area ? { top: area.top, height: area.height } : { top: 0, height: "50dvh" }) : undefined}>
-        <div className={s.miniLabel}>PASSENGER</div>
-        <NameBoardInput ref={input} value={draft.name} placeholder={w.namePlaceholder} caretCell={caretCell} invalid={invalid} label={w.nameTitle}
-          onChange={onChange}
-          onSelectCaret={(at) => { caret.current = at; setCaretAt(at); }}
-          onFocus={() => setFocused(true)}
-          onBlur={() => window.setTimeout(() => { if (document.activeElement !== input.current) setFocused(false); }, 0)} />
-        <div className={`${s.hint} ${notice ? s.notice : ""}`} aria-live="polite">{noticeText || fmt(w.nameHint, { max: NAME_MAX })}</div>
-        {/* 이 목록에 있는 것만 받는다 (lib/glyphs.ts EMOJI_PALETTE). 전광판과 같은 Fluent 3D 그림.
-            누를 때 입력칸 포커스를 뺏지 않게 해서 키보드가 그대로 떠 있다 */}
-        <div className={s.palette} role="group" aria-label="emoji">
-          {EMOJI_PALETTE.map((em) => (
-            <button key={em} type="button" className={s.emojiBtn} disabled={full} aria-label={em} tabIndex={-1}
-              onPointerDown={(ev) => ev.preventDefault()} onMouseDown={(ev) => ev.preventDefault()} onClick={() => insert(em)}>
-              <EmojiImg e={em} />
-            </button>
-          ))}
-        </div>
+      <NameBoardInput value={draft.name} placeholder={w.namePlaceholder} caretCell={caretCell} invalid={!!err} label={w.nameTitle}
+        onPlaceCaret={(at) => { caret.current = at; setCaretAt(at); }} />
+      {/* 오류는 안내 줄 자리에 (낮은 화면에서 안내 줄은 접히지만 오류는 늘 보인다) */}
+      {err ? <div className={s.err} role="alert">{err}</div> : <div className={`${s.hint} ${s.nameHint}`}>{fmt(w.nameHint, { max: NAME_MAX })}</div>}
+      {/* 이모지는 입력칸과 자판 사이에 32개를 늘 전부 펼쳐 둔다: 보여야 고르고 꾸민다. 이 목록에 있는 것만 받는다 (lib/glyphs.ts EMOJI_PALETTE).
+          화면이 낮으면 작게, 길면 크게: 줄 높이를 남는 자리에 맞춘다 */}
+      <div ref={emojiBox} className={`${s.palette} ${s.nameEmoji}`} style={{ gridAutoRows: emojiRow }} role="group" aria-label="emoji">
+        {EMOJI_PALETTE.map((em) => (
+          <button key={em} type="button" className={s.emojiBtn} disabled={emojiFull || full} aria-label={em} tabIndex={-1} onClick={() => type(em)}>
+            <EmojiImg e={em} />
+          </button>
+        ))}
       </div>
+      <div style={{ height: Math.max(0, padH - PAGE_BOTTOM_PAD) }} aria-hidden="true" />
+
+      {/* body 에 직접 그린다: 단계 전환 애니메이션(transform) 안에 두면 그동안 화면 아래에 붙지 않고 본문을 따라 움직인다 */}
+      {createPortal(
+      <div className={s.keys} ref={pad}>
+        {KEY_ROWS.map((row, i) => (
+          <div key={row} className={`${s.keyRow} ${i === 1 ? s.keyRowInset : ""}`}>
+            {/* 실제 자판의 Shift 자리를 비워 둬서 Z~M 이 손에 익은 위치에 온다 */}
+            {i === 2 && <span className={s.keyGap} aria-hidden="true" />}
+            {[...row].map((k) => (
+              <button key={k} type="button" className={s.key} tabIndex={-1} aria-label={k} onPointerDown={press(() => type(k))}>{k}</button>
+            ))}
+            {i === 2 && (
+              <button type="button" className={`${s.key} ${s.keyWide}`} tabIndex={-1} aria-label={w.nameDelete}
+                onPointerDown={press(erase)}>⌫</button>
+            )}
+          </div>
+        ))}
+        <div className={s.keyRow}>
+          <button type="button" className={`${s.key} ${s.keyWide}`} tabIndex={-1} aria-label="-" onPointerDown={press(() => type("-"))}>-</button>
+          <button type="button" className={`${s.key} ${s.keySpace}`} tabIndex={-1} aria-label="space" onPointerDown={press(() => type(" "))}>SPACE</button>
+          <button type="button" className={`${s.key} ${s.keyWide}`} tabIndex={-1} aria-label="." onPointerDown={press(() => type("."))}>.</button>
+        </div>
+        <button className={`btn ${s.keyNext}`} type="submit" form={WIZARD_FORM} disabled={busy || !ready}>{w.next}</button>
+      </div>, document.body)}
     </>
   );
 }
@@ -622,11 +686,6 @@ function EmojiImg({ e }: { e: string }) {
   const src = emojiSrc(e);
   // eslint-disable-next-line @next/next/no-img-element
   return src ? <img className={s.emojiImg} src={src} alt={e} draggable={false} /> : <>{e}</>;
-}
-
-/** 표시명을 글자와 Fluent 그림 이모지로 (완료 화면 등) */
-function NameText({ name }: { name: string }) {
-  return <>{cells(name).map((g, i) => (emojiSrc(g) ? <EmojiImg key={i} e={g} /> : g))}</>;
 }
 
 function ConsentStep({ values, setters }: { values: boolean[]; setters: ((v: boolean) => void)[] }) {
@@ -651,6 +710,7 @@ function ConsentStep({ values, setters }: { values: boolean[]; setters: ((v: boo
           </div>
         </label>
       ))}
+      {/* 전체 동의는 엄지가 닿는 아래쪽, 입국 버튼 바로 위에 크게 둔다 (위쪽은 읽는 자리). 선택 항목을 미리 체크해 두지는 않는다 */}
       <button type="button" className={`${s.all} ${all ? s.on : ""}`} aria-pressed={all} onClick={() => setters.forEach((f) => f(!all))}>
         <span className={s.tick} />{w.agreeAll}
       </button>
@@ -838,14 +898,6 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
     if (won || lost) trackOnce(`tp_seen_${p.seq}_${r?.round_name ?? ""}`, "result_seen", "done", { rank: r?.rank ?? null });
   }, [won, lost, p.seq, r?.round_name, r?.rank]);
 
-  // 전광판에 떠 있는 동안만 /api/me 를 자주 불러 줄 번호를 따라간다. 전광판 줄 수만큼의 사람에게만 해당돼 부하가 작다
-  const onBoardNow = me.board != null;
-  useEffect(() => {
-    if (!onBoardNow) return;
-    const id = setInterval(() => { if (document.visibilityState === "visible") onRefresh(); }, BOARD_POLL_MS);
-    return () => clearInterval(id);
-  }, [onRefresh, onBoardNow]);
-
   // 추첨 대기 → 결과 나옴 으로 바뀐 순간: 진동 + 탭 제목으로 알림 (당첨 여부는 상자를 열기 전까지 알리지 않는다)
   const prevDrawn = useRef(drawn);
   useEffect(() => {
@@ -933,13 +985,7 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
     </div>
   );
 
-  // 전광판 안내는 실제로 TV 에 내 줄이 떠 있는 동안에만 (서버가 알려준다). 추첨 결과가 나오면 그쪽이 먼저라 뺀다
-  const onBoard = me.board != null && !drawn;
-  // 접히는 동안에도 마지막 줄 번호를 그대로 보여주려고 기억해 둔다
-  const lastRow = useRef(me.board ?? 1);
-  if (me.board != null) lastRow.current = me.board;
-
-  // 순서: (전광판에 떠 있으면 전광판 안내 | 당첨이면 당첨 안내) → 추첨 안내 → 경품
+  // 순서: (추가 질문을 할 수 있으면 "당첨 확률 2배" 안내 | 당첨이면 당첨 안내) → 추첨 안내 → 경품
   return (
     <>
       {/* 결과 공개 연출(Reveal)과 같은 흰 로고. 작게 두어 "전광판을 보세요"보다 앞서지 않게 */}
@@ -947,12 +993,15 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/travelpass-white.svg" alt="Travel Pass" />
       </div>
-      {/* 뒤에 온 사람들에게 밀려 전광판에서 내려가면 접히면서 사라진다 */}
-      <Fold shut={!onBoard}>
+      {/* 맨 위 자리는 "당첨 확률 2배". 전광판은 현장에서 직원이 바로 안내하므로 화면에서 다시 말하지 않는다.
+          다 답했거나 기한이 지나면 접히면서 사라진다 */}
+      <Fold shut={!svOpen}>
         <div className={`${s.board} ${s.rise}`}>
-          <h1 className={s.h}>{h.boardTitle}</h1>
-          <p className={s.boardName}><NameText name={p.display_name} /></p>
-          <p className={s.sub}>{lastRow.current === 1 ? h.boardTop : fmt(h.boardRow, { n: lastRow.current })}</p>
+          <p className={s.offerLead}>{h.surveyOfferLead}</p>
+          <h1 className={s.offerBig}>{h.surveyApplied}</h1>
+          <button type="button" className={`btn ${s.cta}`} onClick={onSurvey}>
+            {svStarted > 0 ? fmt(h.surveyResume, { n: svStarted }) : h.surveyStart}
+          </button>
         </div>
       </Fold>
 
@@ -975,7 +1024,7 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
       )}
 
       {!won && (
-        <div className={`card ${s.hero} ${s.rise} ${onBoard ? s.underBoard : ""}`}>
+        <div className={`card ${s.hero} ${s.rise} ${svOpen ? s.underBoard : ""}`}>
           <p className={s.raffleNo}>{h.raffleNo}<b>{seq4}</b>{svDoubled && <span className={s.x2}>{h.surveyApplied}</span>}</p>
           {pending ? (
             <>
@@ -988,13 +1037,7 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
               {target ? <Countdown target={target} /> : <p className={s.sub}>{sub}</p>}
             </>
           )}
-          {svOpen && (
-            // 남은 시간이 주인공이라 버튼은 가볍게: 테두리만 있는 작은 알약 하나, 설명 줄 없음
-            <button type="button" className={s.bonus} onClick={onSurvey}>
-              {svStarted > 0 ? fmt(h.surveyResume, { n: svStarted }) : h.surveyCta}
-            </button>
-          )}
-          {/* 추첨 덩어리: 번호 → 남은 시간 → (추가 질문) → 걸린 경품 → 지난 발표 보기. 한 카드 안에서 붙여 둔다 */}
+          {/* 추첨 덩어리: 번호 → 남은 시간 → 걸린 경품 → 지난 발표 보기. 한 카드 안에서 붙여 둔다 */}
           {ranks.length > 0 && (
             // 경품은 작은 한 줄로. 인원수는 발표 화면에 있다
             <p className={s.prizeLine}>{ranks.map((k) => `${rankName(k)} ${prizeOf(k)}`).join(" · ")}</p>
