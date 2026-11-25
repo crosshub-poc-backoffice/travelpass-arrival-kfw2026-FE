@@ -473,7 +473,7 @@ export default function FlipBoard() {
             <img className={styles.logo} src="/brand/travelpass-dark.svg" alt="Travel Pass" />
           </div>
         </footer>
-        {adOn && adAt !== null && <PreDrawAd src={ad?.src ?? ""} video={!!ad?.video} left={adAt - now} />}
+        {adOn && adAt !== null && <PreDrawAd src={ad?.src ?? ""} video={!!ad?.video} sound={soundOn} left={adAt - now} />}
         {summary && winners && <WinnersSummary pin={winners} spinning={spinning} onTick={() => sound.current?.tick()} />}
       </div>
 

@@ -18,6 +18,7 @@ const LOCAL = process.env.NODE_ENV !== "production";
 const LOCAL_DIR = path.join(process.cwd(), "public", "ads-local");
 const PREFIX = "ads/";
 const TYPES = ["image/*", "video/*"];
+const IMAGE = /\.(png|jpe?g|webp|gif|avif)$/i;
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 const fail = (status: number, error: string) => json({ error }, status);
@@ -28,10 +29,12 @@ export async function GET(req: NextRequest) {
   if (!(await isAdmin(req))) return fail(401, "로그인이 필요해요.");
   try {
     if (HAS_BLOB) {
-      const { blobs } = await list({ prefix: PREFIX, limit: 100 });
+      // 저장소 전체에서 사진·영상만 고른다 (Vercel 대시보드에서 폴더 없이 바로 올린 파일도 보이게)
+      const { blobs } = await list({ limit: 200 });
       const items: AdFile[] = blobs
+        .filter((b) => isVideoName(b.pathname) || IMAGE.test(b.pathname))
         .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime())
-        .map((b) => ({ url: b.url, name: b.pathname.slice(PREFIX.length), video: isVideoName(b.pathname), size: b.size }));
+        .map((b) => ({ url: b.url, name: b.pathname.startsWith(PREFIX) ? b.pathname.slice(PREFIX.length) : b.pathname, video: isVideoName(b.pathname), size: b.size }));
       return json({ mode: "blob", items } satisfies AdList);
     }
     if (!LOCAL) return json({ mode: "off", items: [] } satisfies AdList);

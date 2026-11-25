@@ -23,6 +23,26 @@ export function saveChoice(c: ShowChoice) {
   try { localStorage.setItem(STORE, JSON.stringify(c)); } catch {}
 }
 
+/** 영상 길이(초). 못 읽으면 null */
+function videoSec(url: string): Promise<number | null> {
+  return new Promise((done) => {
+    const v = document.createElement("video");
+    const end = (n: number | null) => { v.removeAttribute("src"); done(n); };
+    v.preload = "metadata";
+    v.onloadedmetadata = () => end(Number.isFinite(v.duration) ? v.duration : null);
+    v.onerror = () => end(null);
+    setTimeout(() => end(null), 8000);
+    v.src = url;
+  });
+}
+/** 광고를 고르면 보여 줄 시간을 맞춘다: 영상은 영상 길이(5초 단위로 내림), 사진은 지금 값 그대로 */
+async function withAd(c: ShowChoice, ad: AdFile | null): Promise<ShowChoice> {
+  if (!ad?.video) return { ...c, ad };
+  const d = await videoSec(ad.url);
+  const adSec = d === null ? c.adSec : Math.min(AD_SEC.max, Math.max(AD_SEC.min, Math.floor(d / AD_SEC.step) * AD_SEC.step));
+  return { ...c, ad, adSec };
+}
+
 function Stepper({ value, unit, min, max, step, disabled, onChange }: { value: number; unit: string; min: number; max: number; step: number; disabled: boolean; onChange: (v: number) => void }) {
   return (
     <div className="draw-dlg-step">
@@ -42,9 +62,13 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
   useEffect(() => {
     api<AdList>("/board/ads").then(setAds).catch((e) => { setAds({ mode: "off", items: [] }); setErr((e as Error).message); });
   }, []);
-  // 기억해 둔 광고가 지워졌으면 "없음"으로
+  // 기억해 둔 광고가 지워졌으면 "없음"으로. 이 브라우저에서 처음이면 가장 최근에 올린 광고를 기본으로 고른다
   useEffect(() => {
-    if (ads && value.ad && !ads.items.some((f) => f.url === value.ad!.url)) onChange({ ...value, ad: null });
+    if (!ads) return;
+    let first = false;
+    try { first = localStorage.getItem(STORE) === null; } catch {}
+    if (value.ad && !ads.items.some((f) => f.url === value.ad!.url)) onChange({ ...value, ad: null });
+    else if (first && !value.ad && ads.items[0]) withAd(value, ads.items[0]).then(onChange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ads]);
 
@@ -66,7 +90,7 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
         added = d as AdFile;
       }
       setAds({ ...ads, items: [added, ...ads.items.filter((f) => f.url !== added.url)] });
-      onChange({ ...value, ad: added });
+      onChange(await withAd(value, added));
     } catch (e) {
       setErr(`올리지 못했어요. ${(e as Error).message}`);
     } finally {
@@ -84,9 +108,9 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
         <div className="draw-dlg-claim-k">추첨 전 광고</div>
         <div className="draw-show-line">
           <select className="select" value={value.ad?.url ?? ""} disabled={busy || !ads}
-            onChange={(e) => onChange({ ...value, ad: ads?.items.find((f) => f.url === e.target.value) ?? null })}>
+            onChange={(e) => { withAd(value, ads?.items.find((f) => f.url === e.target.value) ?? null).then(onChange); }}>
             <option value="">{ads ? "없음 · 바로 추첨" : "불러오는 중…"}</option>
-            {ads?.items.map((f) => <option key={f.url} value={f.url}>{f.video ? "영상" : "사진"} · {f.name}</option>)}
+            {ads?.items.map((f) => <option key={f.url} value={f.url}>{f.video ? "영상" : "사진"} · {f.name} · {f.size >= 1048576 ? `${Math.round(f.size / 1048576)}MB` : `${Math.max(1, Math.round(f.size / 1024))}KB`}</option>)}
           </select>
           {canUpload && (
             <button className="btn ghost sm" type="button" disabled={busy} onClick={() => fileRef.current?.click()}>{upPct !== null ? `올리는 중 ${upPct}%` : "파일 올리기"}</button>

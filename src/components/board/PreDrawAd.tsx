@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import s from "./ad.module.css";
 
 interface Props {
@@ -7,6 +8,8 @@ interface Props {
   src: string;
   /** 영상이면 true, 이미지면 false */
   video: boolean;
+  /** 전광판 소리가 켜져 있으면 영상 광고도 소리와 함께 튼다 (화면을 한 번 누르거나 S 키를 눌러야 켜진다) */
+  sound: boolean;
   /** 광고가 끝나기까지 남은 시간(ms). 0 이하면 정해 둔 시간이 다 돼 광고를 내리고 추첨을 기다리는 중 */
   left: number;
 }
@@ -16,8 +19,17 @@ interface Props {
  * 구석에 추첨까지 남은 시간을 띄운다. 이미지는 정해 둔 시간만큼 보여 주고, 영상은 그 시간이 되면 끝까지 안 갔어도 자른다.
  * 시간이 다 되면 광고를 내리고, 추첨 결과가 오는 대로 바로 이름을 돌린다.
  */
-export default function PreDrawAd({ src, video, left }: Props) {
+export default function PreDrawAd({ src, video, sound, left }: Props) {
+  const ref = useRef<HTMLVideoElement>(null);
   const sec = Math.max(0, Math.ceil(left / 1000));
+  const playing = video && !!src && sec > 0;
+  // 소리와 함께 틀어 보고, 브라우저가 막으면(화면을 누른 적이 없으면) 소리 없이라도 튼다
+  useEffect(() => {
+    const v = ref.current;
+    if (!playing || !v) return;
+    v.muted = !sound;
+    v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+  }, [playing, sound]);
   const mmss = `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
 
   if (sec === 0) {
@@ -32,7 +44,7 @@ export default function PreDrawAd({ src, video, left }: Props) {
       {!src ? (
         <div className={s.empty}><b>광고 자리</b><span>16:9 영상 또는 이미지</span></div>
       ) : video ? (
-        <video className={s.media} src={src} autoPlay muted loop playsInline />
+        <video ref={ref} className={s.media} src={src} autoPlay muted loop playsInline />
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img className={s.media} src={src} alt="" />
