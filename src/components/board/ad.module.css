@@ -1,0 +1,18 @@
+/* 추첨 직전 광고 화면. 전광판 프레임(.frame)을 그대로 덮는다. 단위 --u 는 board.module.css 의 .stage 에서 온다 */
+.wrap { position: absolute; inset: 0; background: #000; font-family: var(--sans); animation: in 0.6s ease-out both; overflow: hidden; }
+@keyframes in { from { opacity: 0; } to { opacity: 1; } }
+
+.media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(1 * var(--u)); background: #141418; color: var(--muted); }
+.empty b { font-size: calc(4 * var(--u)); font-weight: 700; color: #3a3a42; }
+.empty span { font-size: calc(1.5 * var(--u)); color: #3a3a42; }
+
+/* 구석의 남은 시간. 광고를 가리지 않게 작게, 숫자만 크게 */
+.badge { position: absolute; right: calc(2.4 * var(--u)); bottom: calc(2.4 * var(--u)); display: flex; flex-direction: column; align-items: flex-end; padding: calc(1.2 * var(--u)) calc(2 * var(--u)); border-radius: calc(1.4 * var(--u)); background: rgba(11, 11, 13, 0.86); }
+.badgeLabel { color: var(--yellow); font-size: calc(1.25 * var(--u)); font-weight: 700; letter-spacing: 0.14em; }
+.badgeTime { color: #fff; font-size: calc(4.6 * var(--u)); font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+/* 광고 시간이 끝나고 추첨을 기다리는 동안 */
+.hold { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(1.4 * var(--u)); background: #0b0b0d; }
+.hold b { color: var(--yellow); font-size: calc(6 * var(--u)); font-weight: 700; letter-spacing: 0.12em; }
+.hold span { color: var(--fg); font-size: calc(2.4 * var(--u)); font-weight: 600; }
