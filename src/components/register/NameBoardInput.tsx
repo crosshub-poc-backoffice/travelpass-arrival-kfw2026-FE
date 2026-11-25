@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { FlipEngine } from "@/components/board/flipEngine";
 import { cells } from "@/lib/glyphs";
 import { MINI_WIDTH } from "./MiniBoard";
@@ -13,24 +13,18 @@ interface Props {
   caretCell: number | null;
   invalid?: boolean;
   label: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onSelectCaret: (utf16: number) => void;
-  onFocus: () => void;
-  onBlur: () => void;
+  /** 칸을 눌러 커서를 옮김 (문자열 위치) */
+  onPlaceCaret: (utf16: number) => void;
 }
 
 /**
- * 미리보기 플립 줄이 곧 입력칸. 보이는 건 전광판과 같은 플립 칸(Fluent 이모지 포함)이고,
- * 그 위에 투명한 input 을 덮어 키보드 입력을 받는다. 칸을 누르면 그 칸 앞으로 커서가 간다.
+ * 미리보기 플립 줄이 곧 입력칸. 보이는 건 전광판과 같은 플립 칸(Fluent 이모지 포함).
+ * 글자는 화면 안 자체 자판(RegisterFlow NameStep)으로 넣는다: 기기 키보드를 띄우지 않으려고 input 을 쓰지 않는다.
+ * 칸을 누르면 그 칸 앞으로 커서가 간다.
  */
-const NameBoardInput = forwardRef<HTMLInputElement, Props>(function NameBoardInput(
-  { value, placeholder, caretCell, invalid, label, onChange, onSelectCaret, onFocus, onBlur },
-  ref,
-) {
+export default function NameBoardInput({ value, placeholder, caretCell, invalid, label, onPlaceCaret }: Props) {
   const root = useRef<HTMLDivElement>(null);
-  const input = useRef<HTMLInputElement>(null);
   const engine = useRef<FlipEngine | null>(null);
-  useImperativeHandle(ref, () => input.current!);
 
   useEffect(() => {
     engine.current = new FlipEngine(root.current!, () => {});
@@ -48,15 +42,12 @@ const NameBoardInput = forwardRef<HTMLInputElement, Props>(function NameBoardInp
     const r = row.getBoundingClientRect();
     const cell = Math.max(0, Math.floor(((clientX - r.left) / r.width) * MINI_WIDTH + 0.35));
     const g = cells(value);
-    const at = g.slice(0, Math.min(cell, g.length)).join("").length;
-    requestAnimationFrame(() => {
-      try { input.current?.setSelectionRange(at, at); } catch {}
-      onSelectCaret(at);
-    });
+    onPlaceCaret(g.slice(0, Math.min(cell, g.length)).join("").length);
   };
 
   return (
-    <div className={`${s.nameBoard} ${invalid ? s.nameBoardInvalid : ""}`} ref={root}>
+    <div className={`${s.nameBoard} ${invalid ? s.nameBoardInvalid : ""}`} ref={root} role="textbox" aria-label={label} aria-readonly="false"
+      onPointerUp={(e) => placeCaret(e.clientX)}>
       <div className={`row ${s.miniRow} ${value ? "" : s.miniDim}`}>
         {Array.from({ length: MINI_WIDTH }, (_, c) => (
           <div key={c} className={`cell ${s.miniCell} ${caretCell === c ? s.caretCell : ""}`}>
@@ -67,15 +58,6 @@ const NameBoardInput = forwardRef<HTMLInputElement, Props>(function NameBoardInp
           </div>
         ))}
       </div>
-      <input ref={input} className={s.nameBoardInput} value={value} aria-label={label}
-        onChange={onChange}
-        onSelect={(e) => onSelectCaret(e.currentTarget.selectionStart ?? value.length)}
-        onPointerUp={(e) => placeCaret(e.clientX)}
-        onFocus={onFocus} onBlur={onBlur}
-        enterKeyHint="done" onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-        autoComplete="off" autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
     </div>
   );
-});
-
-export default NameBoardInput;
+}
