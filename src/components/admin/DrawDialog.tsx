@@ -22,6 +22,8 @@ interface Props {
   /** 전광판 연출: 추첨 전 광고 · 당첨자 화면 방식 · 표시 시간 */
   show: ShowChoice;
   onShow: (c: ShowChoice) => void;
+  /** 연출 설정을 전광판에 못 보냈다. 다시 누르면 연출 없이 추첨한다 */
+  plain: boolean;
   /** 전광판에 광고가 나가는 중이면 광고가 끝나는(= 추첨이 실행되는) 시각(ms). 아니면 null */
   adUntil: number | null;
   /** 광고를 끊고 지금 추첨 */
@@ -38,7 +40,7 @@ interface Props {
  * 추첨 실행 확인. 누른 순간 받아 온 대상 인원을 크게 보여 주고, 실행·오류까지 이 창 안에서 끝낸다.
  * 네이티브 <dialog> 라 Esc·포커스 가두기를 브라우저가 해 준다. 실행 중에는 닫히지 않는다.
  */
-export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plannedMin, claimMin, onClaimMin, show, onShow, adUntil, onDrawNow, onCancelAd, busy, error, onConfirm, onClose }: Props) {
+export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plannedMin, claimMin, onClaimMin, show, onShow, plain, adUntil, onDrawNow, onCancelAd, busy, error, onConfirm, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -134,7 +136,7 @@ export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plann
           <button className="btn ghost sm" type="button" onClick={close} disabled={busy}>{empty ? "닫기" : "취소"}</button>
           {!empty && (
             <button className="btn sm" type="button" onClick={onConfirm} disabled={!preview || busy} autoFocus>
-              {busy ? "추첨 중…" : show.ad ? "광고 틀고 추첨" : early ? "지금 추첨" : "추첨 실행"}
+              {busy ? "추첨 중…" : plain ? "광고 없이 추첨" : show.ad ? "광고 틀고 추첨" : early ? "지금 추첨" : "추첨 실행"}
             </button>
           )}
         </div>

@@ -78,7 +78,7 @@ export default function Rounds() {
   }
 
   /** 추첨 확인 창: 누른 순간 대상을 새로 받아 보여 주고, 실행·오류도 창 안에서 처리 */
-  const [drawing, setDrawing] = useState<{ r: Round; pv: Preview | null; busy: boolean; err: string | null; claimMin: string; show: ShowChoice; adUntil: number | null } | null>(null);
+  const [drawing, setDrawing] = useState<{ r: Round; pv: Preview | null; busy: boolean; err: string | null; claimMin: string; show: ShowChoice; adUntil: number | null; plain?: boolean } | null>(null);
   async function draw(r: Round) {
     const planned = plannedClaimMin(r);
     setDrawing({ r, pv: null, busy: false, err: null, claimMin: planned === null ? "" : String(planned), show: loadChoice(), adUntil: null });
@@ -99,7 +99,10 @@ export default function Rounds() {
       await api(`/api/admin/rounds/${r.id}/draw`, { method: "POST", body: JSON.stringify({ force: new Date(r.announce_at ?? r.cutoff_at).getTime() > Date.now(), claimMin: claimMin === "" ? null : Number(claimMin) }) });
       setDrawing(null);
       load();
-    } catch (e) { setDrawing((d) => d && { ...d, busy: false, adUntil: null, err: (e as Error).message }); }
+    } catch (e) {
+      // 광고를 이미 틀었다면 다시 누를 때는 광고 없이 바로 추첨한다 (광고가 처음부터 다시 나오지 않게)
+      setDrawing((d) => d && { ...d, busy: false, err: (e as Error).message, ...(d.adUntil !== null ? { adUntil: null, show: { ...d.show, ad: null } } : {}) });
+    }
     finally { drawSent.current = false; }
   }
   /**
@@ -108,14 +111,16 @@ export default function Rounds() {
    */
   async function confirmDraw() {
     if (!drawing || drawing.busy) return;
-    const { show } = drawing;
+    const { show, plain } = drawing;
+    // 연출 설정을 못 보낸 뒤 다시 누른 경우: 연출 없이 기본 화면으로 바로 추첨한다. 연출 때문에 추첨이 막히면 안 된다
+    if (plain) { await runDraw(); return; }
     saveChoice(show);
     setDrawing({ ...drawing, busy: true, err: null });
     try {
       await api<ShowState>("/board/sync", { method: "POST", body: JSON.stringify({ action: "start", ad: show.ad ? { src: show.ad.url, video: show.ad.video, sec: show.adSec } : null, view: show.view, showSec: show.showMin * 60 }) });
     } catch (e) {
-      // 연출 설정이 전광판에 안 가면 추첨하지 않고 멈춘다 (광고 없이 엉뚱한 화면으로 발표되지 않게)
-      setDrawing((d) => d && { ...d, busy: false, err: `전광판에 연출 설정을 보내지 못했어요. ${(e as Error).message}` });
+      // 한 번은 멈춰서 알린다 (광고 없이 발표되는 걸 모르고 지나가지 않게). 다시 누르면 연출 없이 추첨한다
+      setDrawing((d) => d && { ...d, busy: false, plain: true, err: `전광판에 연출 설정을 보내지 못했어요. (${(e as Error).message}) 다시 누르면 광고 없이 기본 화면(9명씩 넘기기)으로 추첨해요.` });
       return;
     }
     if (show.ad) setDrawing((d) => d && { ...d, busy: false, adUntil: Date.now() + show.adSec * 1000 });
@@ -254,7 +259,7 @@ export default function Rounds() {
       {drawing && (
         <DrawDialog name={drawing.r.name} cutoffAt={drawing.r.cutoff_at} drawAt={drawing.r.announce_at ?? drawing.r.cutoff_at} qty={[drawing.r.qty_rank1, drawing.r.qty_rank2, drawing.r.qty_rank3]}
           preview={drawing.pv} plannedMin={plannedClaimMin(drawing.r)} claimMin={drawing.claimMin} onClaimMin={(v) => setDrawing((d) => d && { ...d, claimMin: v })}
-          show={drawing.show} onShow={(c) => setDrawing((d) => d && { ...d, show: c })} adUntil={drawing.adUntil} onDrawNow={drawNow} onCancelAd={cancelAd} busy={drawing.busy} error={drawing.err} onConfirm={confirmDraw} onClose={() => setDrawing(null)} />
+          show={drawing.show} onShow={(c) => setDrawing((d) => d && { ...d, show: c, plain: false })} plain={!!drawing.plain} adUntil={drawing.adUntil} onDrawNow={drawNow} onCancelAd={cancelAd} busy={drawing.busy} error={drawing.err} onConfirm={confirmDraw} onClose={() => setDrawing(null)} />
       )}
     </>
   );
