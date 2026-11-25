@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { DRAW_QTY, EVENT_DAYS, TZ, fmtDateTime, plannedClaimMin, scheduleRounds, type Rank } from "@/lib/config";
 import StockEditor from "./StockEditor";
@@ -8,6 +8,8 @@ import NoticeEditor from "./NoticeEditor";
 import InfoTip from "./InfoTip";
 import DrawDialog, { type DrawPreview as Preview } from "./DrawDialog";
 import TimePicker from "./TimePicker";
+import { loadChoice, saveChoice, type ShowChoice } from "./ShowOptions";
+import type { ShowState } from "@/lib/show";
 
 interface Round {
   id: number; name: string; cutoff_at: string; announce_at: string | null; claim_until: string | null; qty_rank1: number; qty_rank2: number; qty_rank3: number; status: "open" | "drawn";
@@ -76,25 +78,64 @@ export default function Rounds() {
   }
 
   /** 추첨 확인 창: 누른 순간 대상을 새로 받아 보여 주고, 실행·오류도 창 안에서 처리 */
-  const [drawing, setDrawing] = useState<{ r: Round; pv: Preview | null; busy: boolean; err: string | null; claimMin: string } | null>(null);
+  const [drawing, setDrawing] = useState<{ r: Round; pv: Preview | null; busy: boolean; err: string | null; claimMin: string; show: ShowChoice; adUntil: number | null } | null>(null);
   async function draw(r: Round) {
     const planned = plannedClaimMin(r);
-    setDrawing({ r, pv: null, busy: false, err: null, claimMin: planned === null ? "" : String(planned) });
+    setDrawing({ r, pv: null, busy: false, err: null, claimMin: planned === null ? "" : String(planned), show: loadChoice(), adUntil: null });
     try {
       const pv = await api<Preview>(`/api/admin/rounds/${r.id}/preview`);
       setPreview((p) => ({ ...p, [r.id]: pv }));
       setDrawing((d) => d && d.r.id === r.id ? { ...d, pv } : d);
     } catch (e) { setDrawing((d) => d && { ...d, err: (e as Error).message }); }
   }
-  async function confirmDraw() {
-    if (!drawing) return;
+  /** 실제 추첨. 광고가 끝났을 때·"지금 바로 추첨"·광고 없는 추첨이 모두 여기로 온다. 한 번만 실행되게 막는다 */
+  const drawSent = useRef(false);
+  async function runDraw() {
+    if (!drawing || drawSent.current) return;
+    drawSent.current = true;
     const { r, claimMin } = drawing;
-    setDrawing({ ...drawing, busy: true, err: null });
+    setDrawing((d) => d && { ...d, busy: true, err: null });
     try {
       await api(`/api/admin/rounds/${r.id}/draw`, { method: "POST", body: JSON.stringify({ force: new Date(r.announce_at ?? r.cutoff_at).getTime() > Date.now(), claimMin: claimMin === "" ? null : Number(claimMin) }) });
       setDrawing(null);
       load();
-    } catch (e) { setDrawing((d) => d && { ...d, busy: false, err: (e as Error).message }); }
+    } catch (e) { setDrawing((d) => d && { ...d, busy: false, adUntil: null, err: (e as Error).message }); }
+    finally { drawSent.current = false; }
+  }
+  /**
+   * 추첨 실행: 고른 연출(광고 · 당첨자 화면 방식 · 표시 시간)을 전광판에 먼저 알린다.
+   * 광고가 있으면 그 시간만큼 기다렸다가 추첨하고(광고 중에 폰에서 결과가 먼저 보이지 않게), 없으면 바로 추첨한다.
+   */
+  async function confirmDraw() {
+    if (!drawing || drawing.busy) return;
+    const { show } = drawing;
+    saveChoice(show);
+    setDrawing({ ...drawing, busy: true, err: null });
+    try {
+      await api<ShowState>("/board/sync", { method: "POST", body: JSON.stringify({ action: "start", ad: show.ad ? { src: show.ad.url, video: show.ad.video, sec: show.adSec } : null, view: show.view, showSec: show.showMin * 60 }) });
+    } catch (e) {
+      // 연출 설정이 전광판에 안 가면 추첨하지 않고 멈춘다 (광고 없이 엉뚱한 화면으로 발표되지 않게)
+      setDrawing((d) => d && { ...d, busy: false, err: `전광판에 연출 설정을 보내지 못했어요. ${(e as Error).message}` });
+      return;
+    }
+    if (show.ad) setDrawing((d) => d && { ...d, busy: false, adUntil: Date.now() + show.adSec * 1000 });
+    else await runDraw();
+  }
+  // 광고가 끝나는 순간 추첨
+  const adUntil = drawing?.adUntil ?? null;
+  useEffect(() => {
+    if (adUntil === null) return;
+    const t = setTimeout(() => { runDraw(); }, Math.max(0, adUntil - Date.now()));
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adUntil]);
+  async function drawNow() {
+    await api("/board/sync", { method: "POST", body: JSON.stringify({ action: "skip" }) }).catch(() => {});
+    await runDraw();
+  }
+  async function cancelAd() {
+    await api("/board/sync", { method: "POST", body: JSON.stringify({ action: "cancel" }) }).catch(() => {});
+    setDrawing((d) => d && { ...d, adUntil: null, busy: false });
   }
 
   async function remove(r: Round) {
@@ -212,7 +253,8 @@ export default function Rounds() {
       <NoticeEditor />
       {drawing && (
         <DrawDialog name={drawing.r.name} cutoffAt={drawing.r.cutoff_at} drawAt={drawing.r.announce_at ?? drawing.r.cutoff_at} qty={[drawing.r.qty_rank1, drawing.r.qty_rank2, drawing.r.qty_rank3]}
-          preview={drawing.pv} plannedMin={plannedClaimMin(drawing.r)} claimMin={drawing.claimMin} onClaimMin={(v) => setDrawing((d) => d && { ...d, claimMin: v })} busy={drawing.busy} error={drawing.err} onConfirm={confirmDraw} onClose={() => setDrawing(null)} />
+          preview={drawing.pv} plannedMin={plannedClaimMin(drawing.r)} claimMin={drawing.claimMin} onClaimMin={(v) => setDrawing((d) => d && { ...d, claimMin: v })}
+          show={drawing.show} onShow={(c) => setDrawing((d) => d && { ...d, show: c })} adUntil={drawing.adUntil} onDrawNow={drawNow} onCancelAd={cancelAd} busy={drawing.busy} error={drawing.err} onConfirm={confirmDraw} onClose={() => setDrawing(null)} />
       )}
     </>
   );

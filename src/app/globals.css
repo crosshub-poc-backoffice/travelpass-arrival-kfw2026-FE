@@ -439,3 +439,14 @@ h2.sec { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
 .draw-dlg-step span { min-width: 52px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .draw-dlg-until { font-size: 14px; color: var(--muted); }
 .draw-dlg-until b { font-family: var(--mono); font-size: 22px; color: var(--fg); margin-right: 4px; }
+
+/* 추첨 실행 창의 전광판 연출 설정 (ShowOptions): 추첨 전 광고 · 당첨자 화면 */
+.draw-show-row { margin-top: 24px; }
+.draw-show-line { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.draw-show-line .select { flex: 1; min-width: 0; }
+.draw-show-line .btn { white-space: nowrap; }
+.draw-show-hint { font-size: 13px; color: var(--muted); }
+.draw-show-seg { display: flex; flex: 1; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.draw-show-seg button { flex: 1; height: 36px; border: 0; background: transparent; color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; }
+.draw-show-seg button.on { background: var(--panel-2); color: var(--fg); }
+.draw-show-seg button:disabled { cursor: default; }

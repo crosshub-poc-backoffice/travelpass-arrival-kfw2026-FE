@@ -1,0 +1,50 @@
+/* 당첨자 모아보기. 전광판 프레임(.frame)을 그대로 덮는다. 단위 --u 는 board.module.css 의 .stage 에서 온다 */
+.wrap {
+  position: absolute;
+  inset: 0;
+  padding: calc(2.2 * var(--u)) calc(3 * var(--u)) calc(1.6 * var(--u));
+  background: #0b0b0d;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sans);
+  color: var(--fg);
+  animation: in 0.5s ease-out both;
+}
+@keyframes in { from { opacity: 0; } to { opacity: 1; } }
+
+.emo { display: inline-block; width: 1em; height: 1em; vertical-align: -0.14em; background: center / contain no-repeat; }
+
+/* 위쪽 띠: 왼쪽 1등, 오른쪽 폰으로 확인하라는 안내 */
+.hero { display: flex; align-items: center; justify-content: space-between; gap: calc(3 * var(--u)); height: calc(10.6 * var(--u)); margin-bottom: calc(1.4 * var(--u)); }
+.firsts { display: flex; gap: calc(4 * var(--u)); min-width: 0; }
+.first { min-width: 0; }
+.firstLabel { color: var(--yellow); font-size: calc(1.35 * var(--u)); font-weight: 700; letter-spacing: 0.2em; }
+.firstName { color: var(--yellow); font-size: calc(5.6 * var(--u)); font-weight: 800; line-height: 1.15; letter-spacing: 0.02em; white-space: nowrap; }
+.firstSub { color: var(--fg); font-size: calc(1.9 * var(--u)); font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; }
+
+.guide { display: flex; align-items: center; gap: calc(2 * var(--u)); flex: none; }
+.guideText { text-align: right; }
+.guideText strong { display: block; color: #fff; font-size: calc(2.6 * var(--u)); font-weight: 700; line-height: 1.3; }
+.guideText span { display: block; margin-top: calc(0.6 * var(--u)); color: var(--muted); font-size: calc(1.25 * var(--u)); }
+
+/* 2·3등: 등수 이름표 한 줄 아래 4열 목록 */
+.group { margin-top: calc(1 * var(--u)); }
+.groupHead { display: flex; align-items: baseline; gap: calc(0.9 * var(--u)); height: calc(2.3 * var(--u)); }
+.groupLabel { color: var(--yellow); font-size: calc(1.4 * var(--u)); font-weight: 700; letter-spacing: 0.22em; }
+.groupCount { color: var(--muted); font-size: calc(1.1 * var(--u)); font-weight: 600; }
+
+.list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: var(--rh); column-gap: calc(2.6 * var(--u)); }
+.entry {
+  display: grid;
+  /* 출발지 칸은 줄이 커져도(당첨자가 적을 때) 이름을 밀어내지 않게 너비를 묶는다 */
+  grid-template-columns: auto min(calc(3 * var(--rh)), calc(7.8 * var(--u))) minmax(0, 1fr);
+  align-items: center;
+  column-gap: calc(0.26 * var(--rh));
+  font-size: calc(0.62 * var(--rh));
+  white-space: nowrap;
+}
+.flag { font-size: 1.05em; line-height: 1; }
+.origin { color: var(--muted); font-size: 0.74em; font-weight: 600; letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; }
+.name { color: #fff; font-weight: 700; letter-spacing: 0.02em; overflow: hidden; text-overflow: ellipsis; }
+/* 뜸 들이는 동안은 이름이 계속 바뀌므로 1등 자리도 아직 흰색. 멈추는 순간 노랑으로 */
+.spinning .firstName { color: #fff; }
