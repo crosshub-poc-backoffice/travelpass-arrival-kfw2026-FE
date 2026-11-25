@@ -38,6 +38,12 @@ const PAGE_MS = 8000;
 /** ?test 의 가짜 당첨 발표가 떠 있는 시간 (실제는 서버 WINNERS_SHOW_MS) */
 const TEST_WINNERS_MS = 60000;
 const RANK_LABEL: Record<number, string> = { 1: "🏆 1ST", 2: "2ND", 3: "3RD" };
+/** 추첨 직후 당첨자를 띄우기 전에 이름을 돌리며 뜸을 들이는 시간 */
+const DRAW_SPIN_MS = 4000;
+/** 그동안 줄을 새 이름으로 다시 돌리는 간격. 한 줄이 끝 칸까지 넘어가기 시작하는 시간보다 길어야 끝 칸도 돈다 */
+const SPIN_STEP_MS = 680;
+/** 뜸 들이는 동안 플랩 소리 크기 (평소의 몇 배) */
+const SPIN_VOLUME = 0.3;
 
 type WinnersPin = Extract<BoardPin, { kind: "winners" }>;
 
@@ -48,11 +54,14 @@ function fit(parts: string[]): string[] {
   });
 }
 
+/** 같은 추첨인지 가리는 값. 이 값이 처음 보이면 뜸을 들인다 */
+const drawKey = (pin: WinnersPin) => `${pin.round}|${pin.drawn_at}`;
 const pageCount = (pin: WinnersPin) => Math.max(1, Math.ceil(pin.winners.length / BOARD_ROWS));
 
 /** 하단 고정 줄 칸. 당첨자 화면이면 페이지 안내, 평소엔 다음 추첨 안내 */
-function pinCells(pin: BoardPin | null, page: number, scanHint: boolean): string[] {
+function pinCells(pin: BoardPin | null, page: number, scanHint: boolean, spinning: boolean): string[] {
   if (!pin) return fit(COLS.map(() => ""));
+  if (pin.kind === "winners" && spinning) return fit([hhmm(pin.drawn_at), "🏆", "LUCKY DRAW", "DRAWING...", "", ""]);
   // 당첨자 화면에서는 페이지 안내와 "티켓 QR 을 다시 찍어 결과 확인" 안내를 번갈아 띄운다 (경품은 현장 수령만이라)
   if (pin.kind === "winners" && scanHint) return fit([hhmm(pin.drawn_at), "📸", "SCAN TICKET", "QR TO CHECK", "RESULT", ""]);
   if (pin.kind === "winners") return fit([hhmm(pin.drawn_at), "🏆", "LUCKY DRAW", "WINNERS", "", `${page + 1}/${pageCount(pin)}`]);
@@ -60,8 +69,8 @@ function pinCells(pin: BoardPin | null, page: number, scanHint: boolean): string
 }
 
 /** 당첨자 한 줄. 도착 줄과 같은 형식에 REMARK 만 등수 */
-function winnerCells(pin: WinnersPin, w: WinnersPin["winners"][number] | undefined): string[] {
-  return fit(w ? [hhmm(pin.drawn_at), originFlag(w.origin_code), w.origin_code, w.display_name, flightCode(w.seq), RANK_LABEL[w.rank] ?? ""] : COLS.map(() => ""));
+function winnerCells(pin: WinnersPin, w: WinnersPin["winners"][number] | undefined, remark = w ? RANK_LABEL[w.rank] ?? "" : ""): string[] {
+  return fit(w ? [hhmm(pin.drawn_at), originFlag(w.origin_code), w.origin_code, w.display_name, flightCode(w.seq), remark] : COLS.map(() => ""));
 }
 
 /** 행을 칸 배열로. 이모지·국기도 한 칸이라 문자열 길이가 아니라 그래핌으로 자른다 */
@@ -82,6 +91,18 @@ export default function FlipBoard() {
   const pin = testPin ?? serverPin;
   const winners = pin?.kind === "winners" ? pin : null;
   const [page, setPage] = useState(0);
+  /**
+   * 뜸 들이기가 끝난 추첨. 당첨자가 처음 내려온 순간부터 DRAW_SPIN_MS 동안은 이름을 돌리고, 그 뒤에 당첨자 줄을 띄운다.
+   * 이미 발표된 뒤에 화면을 열었으면(TV 새로고침) 뜸 들이지 않고 바로 당첨자 화면.
+   */
+  const [landedKey, setLandedKey] = useState<string | null>(null);
+  const winKey = winners ? drawKey(winners) : null;
+  const spinning = winKey !== null && landedKey !== winKey;
+  useEffect(() => {
+    if (!winKey || landedKey === winKey) return;
+    const t = setTimeout(() => setLandedKey(winKey), DRAW_SPIN_MS);
+    return () => clearTimeout(t);
+  }, [winKey, landedKey]);
   const pinShown = useRef(false);
   /** 지금 그리드를 당첨자가 차지하고 있는지. 폴링이 도착 줄을 덮어쓰지 않게 apply 에서 본다 */
   const winnersOn = useRef(false);
@@ -161,13 +182,29 @@ export default function FlipBoard() {
   const curPage = pages ? page % pages : 0;
   useEffect(() => {
     setPage(0);
-    if (!pages) return;
+    // 뜸 들이는 동안은 페이지를 세지 않는다 (첫 페이지가 PAGE_MS 를 다 채우게)
+    if (!pages || spinning) return;
     const t = setInterval(() => setPage((p) => p + 1), PAGE_MS);
     return () => clearInterval(t);
-  }, [winners, pages]);
+  }, [winners, pages, spinning]);
   useEffect(() => {
     const eng = engine.current;
     if (!eng) return;
+    if (winners && spinning) {
+      // 뜸 들이기: 모든 줄에 당첨자 이름을 등수 없이 계속 바꿔 넣어 판이 쉬지 않고 돈다
+      winnersOn.current = true;
+      setFresh([]);
+      const snd = sound.current;
+      if (snd) snd.volume = SPIN_VOLUME;
+      const list = winners.winners;
+      const spin = () => {
+        if (!list.length) return;
+        for (let i = 0; i < BOARD_ROWS; i++) eng.setRow(i, winnerCells(winners, list[Math.floor(Math.random() * list.length)], ""));
+      };
+      spin();
+      const t = setInterval(spin, SPIN_STEP_MS);
+      return () => { clearInterval(t); if (snd) snd.volume = 1; };
+    }
     if (winners) {
       winnersOn.current = true;
       setFresh([]);
@@ -177,18 +214,19 @@ export default function FlipBoard() {
       winnersOn.current = false;
       for (let i = 0; i < BOARD_ROWS; i++) eng.setRow(i, rowCells(rowsRef.current[i]), { baseDelay: i * 60 });
     }
-  }, [winners, curPage]);
+  }, [winners, curPage, spinning]);
 
   // 고정 줄: 내용이 바뀌면 넘긴다(첫 표시는 바로)
   useEffect(() => {
-    pinEngine.current?.setRow(0, pinCells(pin, curPage, page % 2 === 1), { instant: !pinShown.current });
+    pinEngine.current?.setRow(0, pinCells(pin, curPage, page % 2 === 1, spinning), { instant: !pinShown.current });
     pinShown.current = true;
-  }, [pin, curPage, page]);
+  }, [pin, curPage, page, spinning]);
 
   // 폴링: TV 가 재접속/새로고침돼도 서버 기록으로 복원된다
   useEffect(() => {
     let stop = false;
     let lastSig = "";
+    let first = true;
     async function poll() {
       try {
         const r = await fetch(`/api/board?limit=${BOARD_ROWS}`, { cache: "no-store" });
@@ -196,6 +234,9 @@ export default function FlipBoard() {
         const data = (await r.json()) as { rows: Row[]; total: number; pin?: BoardPin };
         setOnline(true);
         const nextPin = data.pin ?? null;
+        // 화면을 열었을 때 이미 발표돼 있던 추첨은 뜸 들이지 않는다
+        if (first && nextPin?.kind === "winners") setLandedKey(drawKey(nextPin));
+        first = false;
         setServerPin((prev) => (JSON.stringify(prev) === JSON.stringify(nextPin) ? prev : nextPin));
         // 당첨자 화면으로 바뀌는 폴링이면 도착 줄을 먼저 그리지 않게 바로 표시
         if (nextPin?.kind === "winners") winnersOn.current = true;
@@ -270,7 +311,7 @@ export default function FlipBoard() {
         <header className={styles.head}>
           <div className={styles.titleWrap}>
             <svg className={styles.plane} viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
-            <h1 className={styles.title}>{winners ? "Winners" : "Arrivals"}</h1>
+            <h1 className={styles.title}>{spinning ? "Lucky Draw" : winners ? "Winners" : "Arrivals"}</h1>
           </div>
           <div className={styles.meta}>
             <div className={styles.event}>{EVENT_NAME}</div>
@@ -284,7 +325,7 @@ export default function FlipBoard() {
 
         <div className={styles.grid} ref={gridRef}>
           {Array.from({ length: BOARD_ROWS }, (_, r) => (
-            <div key={r} className={`row ${styles.row} ${winners ? (winners.winners[curPage * BOARD_ROWS + r]?.rank === 1 ? styles.gold : "") : fresh.includes(r) ? styles.fresh : ""}`}>
+            <div key={r} className={`row ${styles.row} ${winners ? (!spinning && winners.winners[curPage * BOARD_ROWS + r]?.rank === 1 ? styles.gold : "") : fresh.includes(r) ? styles.fresh : ""}`}>
               {COLS.map((c) => (
                 <div key={c.key} className={`${styles.group} ${styles[c.key]}`}>
                   {Array.from({ length: c.width }, (_, i) => (

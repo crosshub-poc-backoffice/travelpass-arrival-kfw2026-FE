@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlipEngine } from "@/components/board/flipEngine";
-import { FlapSound } from "./sound";
+import { FlapSound } from "@/components/board/sound";
 import { BOARD_ROWS, EVENT_NAME, flightCode, hhmm } from "@/lib/config";
 import { FROM_WIDTH } from "@/lib/origins";
 import { cells, originFlag } from "@/lib/glyphs";

@@ -4,6 +4,8 @@ export class FlapSound {
   private noise: AudioBuffer | null = null;
   private last = 0;
   enabled = false;
+  /** 0~1. 평소 1. 추첨 중에는 모든 줄이 몇 초씩 계속 돌아서 낮춘다 */
+  volume = 1;
 
   async enable() {
     if (!this.ctx) {
@@ -38,7 +40,7 @@ export class FlapSound {
 
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(0.5, now + 0.002);
+    g.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.5 * this.volume), now + 0.002);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
 
     src.connect(bp).connect(g).connect(this.ctx.destination);
