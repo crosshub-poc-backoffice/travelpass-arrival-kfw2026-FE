@@ -51,7 +51,7 @@ const SHOW_LINK_MS = 3 * 60 * 1000;
 const SHOW_POLL_MS = 3000;
 const RANK_LABEL: Record<number, string> = { 1: "🏆 1ST", 2: "2ND", 3: "3RD" };
 /** 추첨 직후 당첨자를 띄우기 전에 이름을 돌리며 뜸을 들이는 시간 */
-const DRAW_SPIN_MS = 4000;
+const DRAW_SPIN_MS = 7000;
 /** 그동안 줄을 새 이름으로 다시 돌리는 간격. 한 줄이 끝 칸까지 넘어가기 시작하는 시간보다 길어야 끝 칸도 돈다 */
 const SPIN_STEP_MS = 680;
 /** 뜸 들이는 동안 플랩 소리 크기 (평소의 몇 배) */
@@ -98,6 +98,8 @@ export default function FlipBoard() {
   const [serverPin, setServerPin] = useState<BoardPin | null>(null);
   /** ?test 가짜 당첨 발표. 떠 있는 동안 서버 값보다 우선 */
   const [testPin, setTestPin] = useState<WinnersPin | null>(null);
+  /** ?test 뜸 들이는 시간(초). 기본값을 정하려고 바꿔 가며 본다 */
+  const [testSpinSec, setTestSpinSec] = useState(DRAW_SPIN_MS / 1000);
   const testPinRef = useRef<WinnersPin | null>(null);
   const testPinTimer = useRef<number | null>(null);
   /** 추첨 연출 설정(광고 · 당첨자 화면 방식 · 표시 시간)과, 서버 시계 − 이 기기 시계 */
@@ -133,6 +135,8 @@ export default function FlipBoard() {
   const [landedKey, setLandedKey] = useState<string | null>(null);
   const winKey = winners ? drawKey(winners) : null;
   const spinning = winKey !== null && landedKey !== winKey;
+  /** 뜸 들이는 시간. 가짜 당첨 발표(?test)는 테스트 버튼에서 고른 값 */
+  const spinMs = testPin ? testSpinSec * 1000 : DRAW_SPIN_MS;
   /** 모아보기: 플립 판 대신 1·2·3등을 한 화면에 모은 화면을 덮는다. 뜸 들이기도 그 화면 안에서 이름을 돌린다 */
   const summary = winners?.view === "summary";
   /** 당첨 효과음용. 화면을 한 번 누른 뒤(소리를 켠 뒤)에만 소리가 난다 */
@@ -145,9 +149,9 @@ export default function FlipBoard() {
       setLandedKey(winKey);
       setBurst((n) => n + 1);
       if (sound.current?.enabled) fanfare(audio.current);
-    }, DRAW_SPIN_MS);
+    }, spinMs);
     return () => clearTimeout(t);
-  }, [winKey, landedKey]);
+  }, [winKey, landedKey, spinMs]);
   const pinShown = useRef(false);
   /** 지금 그리드를 당첨자가 차지하고 있는지. 폴링이 도착 줄을 덮어쓰지 않게 apply 에서 본다 */
   const winnersOn = useRef(false);
@@ -358,8 +362,8 @@ export default function FlipBoard() {
     testPinRef.current = fake;
     setTestPin(fake);
     // 뜸 들이는 시간은 표시 시간에 넣지 않는다
-    testPinTimer.current = window.setTimeout(() => { testPinRef.current = null; setTestPin(null); }, DRAW_SPIN_MS + testMin * 60000);
-  }, [testSummary, testMin]);
+    testPinTimer.current = window.setTimeout(() => { testPinRef.current = null; setTestPin(null); }, testSpinSec * 1000 + testMin * 60000);
+  }, [testSummary, testMin, testSpinSec]);
   useEffect(() => () => { if (testPinTimer.current) clearTimeout(testPinTimer.current); }, []);
 
   /**
@@ -510,6 +514,9 @@ export default function FlipBoard() {
           </label>
           <label>
             <input type="number" min={3} max={600} value={testAdSec} disabled={!!testAdAt} onChange={(e) => setTestAdSec(Math.min(600, Math.max(3, Number(e.target.value) || 3)))} />초
+          </label>
+          <label>
+            뜸<input type="number" min={1} max={30} step={0.5} value={testSpinSec} disabled={!!testPin} onChange={(e) => setTestSpinSec(Math.min(30, Math.max(1, Number(e.target.value) || 1)))} />초
           </label>
           <label><input type="checkbox" checked={testSummary} disabled={!!testPin} onChange={(e) => setTestSummary(e.target.checked)} />모아보기</label>
           <label>
