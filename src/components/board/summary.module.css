@@ -33,11 +33,11 @@
 .groupLabel { color: var(--yellow); font-size: calc(1.4 * var(--u)); font-weight: 700; letter-spacing: 0.22em; }
 .groupCount { color: var(--muted); font-size: calc(1.1 * var(--u)); font-weight: 600; }
 
-.list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: var(--rh); column-gap: calc(2.6 * var(--u)); }
+.list { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); grid-auto-rows: var(--rh); column-gap: calc(2.6 * var(--u)); }
 .entry {
   display: grid;
   /* 출발지 칸은 줄이 커져도(당첨자가 적을 때) 이름을 밀어내지 않게 너비를 묶는다 */
-  grid-template-columns: auto min(calc(3 * var(--rh)), calc(7.8 * var(--u))) minmax(0, 1fr);
+  grid-template-columns: auto min(calc(3 * var(--rh)), var(--ow, calc(6.4 * var(--u)))) minmax(0, 1fr);
   align-items: center;
   column-gap: calc(0.26 * var(--rh));
   font-size: calc(0.62 * var(--rh));

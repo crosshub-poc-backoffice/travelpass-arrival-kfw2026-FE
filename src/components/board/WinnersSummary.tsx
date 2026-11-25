@@ -9,11 +9,31 @@ import s from "./summary.module.css";
 type WinnersPin = Extract<BoardPin, { kind: "winners" }>;
 type Winner = WinnersPin["winners"][number];
 
-/** 2·3등 목록의 열 수 */
-const LIST_COLS = 4;
-/** 목록이 쓸 수 있는 높이(--u 단위)와 한 줄의 최대 높이. 인원이 늘면 줄이 낮아지며 한 화면에 들어온다 */
+/**
+ * 2·3등 목록 배치 (단위는 모두 --u = 프레임 너비의 1/100).
+ * 3열과 4열 가운데 글자가 더 크게 나오는 쪽을 고른다. 글자 크기는 두 가지에 묶인다:
+ * ① 줄 수가 목록 높이(LIST_SPACE)에 다 들어갈 것 ② 가장 긴 이름(12칸)이 한 칸 안에서 잘리지 않을 것.
+ */
 const LIST_SPACE = 33.2;
-const ROW_MAX = 3.4;
+const LIST_WIDTH = 94;
+const COL_GAP = 2.6;
+/** 출발지 칸 너비: 적어도 이만큼은 주고(ORIGIN_W), 칸이 넉넉하면 가장 긴 출발지(11자)가 다 보이는 너비(ORIGIN_MAX)까지 넓힌다 */
+const ORIGIN_W = 6.4;
+const ORIGIN_MAX = 9;
+/** 한 칸 너비 = ORIGIN_W + 글자 크기 × 이 값 (국기 + 간격 + 12칸 이름) 이면 이름이 잘리지 않는다 */
+const NAME_EM = 9.8;
+/** 줄 높이 대비 글자 크기 */
+const FONT_PER_ROW = 0.62;
+function layout(n2: number, n3: number) {
+  const pick = (cols: number) => {
+    const rows = Math.max(1, Math.ceil(n2 / cols) + Math.ceil(n3 / cols));
+    const colW = (LIST_WIDTH - COL_GAP * (cols - 1)) / cols;
+    const font = Math.min((FONT_PER_ROW * LIST_SPACE) / rows, (colW - ORIGIN_W) / NAME_EM);
+    return { cols, font, originW: Math.min(ORIGIN_MAX, colW - NAME_EM * font) };
+  };
+  const a = pick(3), b = pick(4);
+  return a.font >= b.font ? a : b;
+}
 /** 뜸 들이는 동안 이름을 바꿔 끼우는 간격 */
 const SHUFFLE_MS = 110;
 
@@ -71,11 +91,11 @@ export default function WinnersSummary({ pin, spinning, onTick }: Props) {
   const slots = pin.winners.map((w, i) => ({ rank: w.rank, w: mix ? pin.winners[mix[i]] ?? w : w }));
   const byRank = (rank: number) => slots.filter((x) => x.rank === rank).map((x) => x.w);
   const first = byRank(1), second = byRank(2), third = byRank(3);
-  const rows = Math.ceil(second.length / LIST_COLS) + Math.ceil(third.length / LIST_COLS);
-  const rh = Math.min(ROW_MAX, LIST_SPACE / Math.max(1, rows));
+  const { cols, font, originW } = layout(second.length, third.length);
+  const rh = font / FONT_PER_ROW;
 
   return (
-    <div className={`${s.wrap} ${spinning ? s.spinning : ""}`} style={{ ["--rh" as string]: `calc(${rh.toFixed(3)} * var(--u))` }}>
+    <div className={`${s.wrap} ${spinning ? s.spinning : ""}`} style={{ ["--rh" as string]: `calc(${rh.toFixed(3)} * var(--u))`, ["--cols" as string]: cols, ["--ow" as string]: `calc(${originW.toFixed(3)} * var(--u))` }}>
       <div className={s.hero}>
         <div className={s.firsts}>
           {first.map((w, i) => (

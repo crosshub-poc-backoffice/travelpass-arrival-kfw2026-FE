@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { api } from "./api";
-import { AD_MAX_BYTES, AD_SEC, SHOW_MIN, type AdFile, type AdList } from "@/lib/show";
+import { AD_MAX_BYTES, AD_SEC, BUILTIN_ADS, SHOW_MIN, type AdFile, type AdList } from "@/lib/show";
 
 /** 추첨 실행 창에서 고르는 전광판 연출. 마지막에 쓴 값을 이 브라우저에 기억해 다음 회차의 기본값으로 쓴다 */
 export interface ShowChoice {
@@ -60,7 +60,8 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api<AdList>("/board/ads").then(setAds).catch((e) => { setAds({ mode: "off", items: [] }); setErr((e as Error).message); });
+    // 목록을 못 받아도 앱에 들어 있는 기본 광고는 고를 수 있게 한다
+    api<AdList>("/board/ads").then(setAds).catch(() => setAds({ mode: "off", canUpload: false, items: BUILTIN_ADS }));
   }, []);
   // 기억해 둔 광고가 지워졌으면 "없음"으로. 이 브라우저에서 처음이면 가장 최근에 올린 광고를 기본으로 고른다
   useEffect(() => {
@@ -80,7 +81,7 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
     setUpPct(0);
     try {
       let added: AdFile;
-      if (ads.mode === "blob") {
+      if (ads.mode === "blob" && ads.canUpload) {
         const b = await upload(`ads/${file.name}`, file, { access: "public", handleUploadUrl: "/board/ads", multipart: file.size > 20 * 1024 * 1024, onUploadProgress: (p) => setUpPct(Math.round(p.percentage)) });
         added = { url: b.url, name: b.pathname.replace(/^ads\//, ""), video: file.type.startsWith("video/"), size: file.size };
       } else {
@@ -100,7 +101,7 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
   }
 
   const busy = disabled || upPct !== null;
-  const canUpload = ads !== null && ads.mode !== "off";
+  const canUpload = ads !== null && ads.canUpload;
 
   return (
     <div className="draw-show">
@@ -123,7 +124,6 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
             <span className="draw-show-hint">{value.ad.video ? "영상이 더 길어도 이 시간에 끊고 추첨해요" : "이 시간만큼 보여 준 뒤 추첨해요"}</span>
           </div>
         )}
-        {ads?.mode === "off" && <p className="draw-show-hint">광고 저장소(Vercel Blob)가 연결되지 않아 파일을 올릴 수 없어요.</p>}
         {err && <p className="draw-dlg-note err" role="alert" style={{ marginTop: 8 }}>{err}</p>}
       </div>
 

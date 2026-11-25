@@ -24,8 +24,16 @@ export interface DrawShow {
 export interface ShowState { show: DrawShow | null; now: number }
 
 export interface AdFile { url: string; name: string; video: boolean; size: number }
-/** blob = Vercel Blob 에 올린다, local = 개발 서버의 public 폴더에 둔다, off = 저장소가 연결되지 않았다 */
-export interface AdList { mode: "blob" | "local" | "off"; items: AdFile[] }
+/**
+ * mode: blob = Vercel Blob 에 올린다, local = 개발 서버의 public 폴더에 둔다, off = 올릴 저장소가 없다.
+ * canUpload 가 false 여도 items(기본 광고 · 이미 올라와 있는 파일)는 고를 수 있다
+ */
+export interface AdList { mode: "blob" | "local" | "off"; canUpload: boolean; items: AdFile[] }
+
+/** 앱에 같이 들어 있는 기본 광고 (public/ad). 저장소가 끊겨도 이 파일은 항상 고를 수 있다 */
+export const BUILTIN_ADS: AdFile[] = [
+  { url: "/ad/travelpass-ad-75s.mp4", name: "TravelPass 75초", video: true, size: 27593873 },
+];
 
 export const AD_SEC = { min: 5, max: 300, step: 5, initial: 15 };
 export const SHOW_MIN = { min: 1, max: 30, initial: 5 };

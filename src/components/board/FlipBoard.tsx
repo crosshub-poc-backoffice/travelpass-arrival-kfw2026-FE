@@ -31,7 +31,7 @@ const IDLE_MS = 2500;
 /** ?test 로 열면 오른쪽에 넘기기 테스트 버튼. 가짜 승객은 화면에만 뜨고 DB 에는 안 들어간다 */
 const TEST_NAMES = [
   "MINJI ❤️✨", "🐱 NEKO 🌸", "ALEX ✈️🧳", "🔥JAY🔥", "LEA 🌈🦄", "KIM 😎", "SOPHIA 💜", "🥳 PARTY 🥳", "DAVID 🚀", "YUKI ⭐🍀",
-  "🐼 PANDA", "HANA 😍💛", "LEO 🐻🔥", "MIA 🤩📸", "TOM 🗺️🌏", "JUN 🙌", "EMMA 🐶💙", "RIO 🏝️😜", "SORA 🗼✨", "BEN 💳😀",
+  "🐼 PANDA", "HANA 😍💛", "CHRISTOPHER✈️", "MAXIMILIAN W", "LEO 🐻🔥", "MIA 🤩📸", "TOM 🗺️🌏", "JUN 🙌", "EMMA 🐶💙", "RIO 🏝️😜", "SORA 🗼✨", "BEN 💳😀",
 ];
 const TEST_ORIGINS = ["SEOUL", "BUSAN", "JAPAN", "USA", "FRANCE", "SINGAPORE", "VIETNAM", "JEJU", "UK", "AUSTRALIA"];
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
@@ -45,6 +45,10 @@ const TEST_SHOW_MIN = [0.5, 1, 3, 5, 10];
 const AD_HOLD_MS = 60 * 1000;
 /** 직원 화면과 백엔드의 시계 차이를 이만큼은 봐준다 (추첨이 이번 연출 설정의 것인지 가릴 때) */
 const SHOW_SKEW_MS = 5000;
+/** 연출 설정을 적은 뒤(광고가 있으면 광고가 끝난 뒤) 이 시간 안에 실행된 추첨만 그 설정을 따른다. 지난 회차의 설정이 다음 추첨에 묻어가지 않게 */
+const SHOW_LINK_MS = 3 * 60 * 1000;
+/** 연출 설정을 물어보는 간격 */
+const SHOW_POLL_MS = 3000;
 const RANK_LABEL: Record<number, string> = { 1: "🏆 1ST", 2: "2ND", 3: "3RD" };
 /** 추첨 직후 당첨자를 띄우기 전에 이름을 돌리며 뜸을 들이는 시간 */
 const DRAW_SPIN_MS = 4000;
@@ -107,7 +111,7 @@ export default function FlipBoard() {
   const cand = srvWinners ?? held;
   const candAt = cand ? new Date(cand.drawn_at).getTime() : 0;
   /** 이 추첨이 지금 연출 설정으로 실행된 것인지 (설정을 적은 뒤에 추첨됐으면 그렇다) */
-  const linked = !!cand && !!show && candAt >= show.startAt - SHOW_SKEW_MS;
+  const linked = !!cand && !!show && candAt >= show.startAt - SHOW_SKEW_MS && candAt <= show.startAt + (show.ad?.sec ?? 0) * 1000 + SHOW_LINK_MS;
   const candView = linked ? show!.view : undefined;
   // 연출 설정이 있으면 그 표시 시간만큼, 없으면 서버가 내려 주는 동안만
   const candLive = !!cand && (linked ? now + skew < candAt + show!.showSec * 1000 : !!srvWinners);
@@ -306,20 +310,31 @@ export default function FlipBoard() {
       } catch {
         setOnline(false);
       }
-      // 추첨 연출 설정. 못 읽어도 전광판은 그대로 돈다 (그때는 광고 없이 기본 화면으로 발표)
-      try {
-        const r = await fetch("/board/sync", { cache: "no-store" });
-        if (r.ok) {
-          const s = (await r.json()) as ShowState;
-          setSkew(s.now - Date.now());
-          setShow((prev) => (JSON.stringify(prev) === JSON.stringify(s.show) ? prev : s.show));
-        }
-      } catch {}
       if (!stop) setTimeout(poll, POLL_MS);
     }
     poll();
     return () => { stop = true; };
   }, [apply]);
+
+  // 추첨 연출 설정. 못 읽어도 전광판은 그대로 돈다 (그때는 마지막으로 읽은 값, 없으면 광고 없이 기본 화면으로 발표)
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      try {
+        const r = await fetch("/board/sync", { cache: "no-store" });
+        if (r.ok) {
+          const s = (await r.json()) as ShowState;
+          if (stop) return;
+          setSkew(s.now - Date.now());
+          setShow((prev) => (JSON.stringify(prev) === JSON.stringify(s.show) ? prev : s.show));
+        }
+      } catch {}
+      if (!stop) timer = setTimeout(poll, SHOW_POLL_MS);
+    }
+    poll();
+    return () => { stop = true; clearTimeout(timer); };
+  }, []);
 
   /** 테스트: 가짜 승객 한 명 도착 (위에 끼우고 아래로 밀기) */
   const testArrive = useCallback(() => {
@@ -332,7 +347,9 @@ export default function FlipBoard() {
   const testWinners = useCallback(() => {
     if (testPinTimer.current) clearTimeout(testPinTimer.current);
     if (testPinRef.current) { testPinRef.current = null; setTestPin(null); return; }
-    const ranks = [...Array(1).fill(1), ...Array(16).fill(2), ...Array(33).fill(3)];
+    // 인원은 ?test=14,22 처럼 2등·3등 수를 적어 바꿀 수 있다 (기본 16·33)
+    const [n2, n3] = (new URLSearchParams(window.location.search).get("test") ?? "").split(",").map((x) => parseInt(x, 10));
+    const ranks = [...Array(1).fill(1), ...Array(n2 > 0 ? n2 : 16).fill(2), ...Array(n3 > 0 ? n3 : 33).fill(3)];
     const fake: WinnersPin = {
       kind: "winners", round: "TEST", drawn_at: new Date().toISOString(), view: testSummary ? "summary" : "pages",
       winners: ranks.map((rank) => ({ rank, seq: 1 + Math.floor(Math.random() * 999), display_name: pick(TEST_NAMES), origin_code: pick(TEST_ORIGINS) })),
