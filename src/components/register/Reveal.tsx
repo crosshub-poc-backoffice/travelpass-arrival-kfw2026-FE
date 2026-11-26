@@ -92,13 +92,16 @@ interface RevealProps {
   title: string; line: string;
   okLabel: string;
   onDone: () => void;
+  /** 수령 QR 을 바로 여는 버튼 (받을 경품이 있을 때만). 있으면 이 버튼이 주 버튼, "확인"은 그 아래 조용한 버튼이 된다 */
+  qrLabel?: string;
+  onQr?: () => void;
 }
 
 /**
  * 추첨 결과 공개. 선물 상자가 떨다가 빛을 내며 열리고, 당첨이면 경품이 솟아오르며 꽃가루가 터진다.
  * 미당첨이면 같은 상자가 조용히 열리고 위로 문구만 나온다 (빛줄기·꽃가루 없음). 누르기 전에는 당첨 여부를 알 수 없게 시작은 똑같다.
  */
-export default function Reveal({ rank, title, line, okLabel, onDone }: RevealProps) {
+export default function Reveal({ rank, title, line, okLabel, onDone, qrLabel, onQr }: RevealProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const won = rank !== null;
   useConfetti(canvas, won);
@@ -127,7 +130,8 @@ export default function Reveal({ rank, title, line, okLabel, onDone }: RevealPro
         <h1>{title}</h1>
         <p>{line}</p>
       </div>
-      <button type="button" className={`btn ${s.ok}`} onClick={onDone}>{okLabel}</button>
+      {onQr && <button type="button" className={`btn ${s.ok}`} onClick={onQr}>{qrLabel}</button>}
+      <button type="button" className={`btn ${onQr ? `ghost ${s.ok2}` : s.ok}`} onClick={onDone}>{okLabel}</button>
       <canvas ref={canvas} className={s.confetti} aria-hidden="true" />
     </div>
   );

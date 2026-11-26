@@ -67,6 +67,8 @@
 .lose .text h1 { font-size: 24px; font-weight: 700; color: var(--fg); }
 .lose .text p { font-size: 15px; font-weight: 400; color: var(--muted); }
 .ok { max-width: 420px; margin-top: 32px; animation: up 0.5s calc(var(--open) + 1.3s) cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+/* QR 버튼이 있을 때 그 아래의 "확인" */
+.ok2 { max-width: 420px; margin-top: 12px; animation: up 0.5s calc(var(--open) + 1.4s) cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 @keyframes up { from { opacity: 0; transform: translateY(14px); } }
 
 /* 움직임 줄이기: 연출 없이 결과만 바로 보여준다 */

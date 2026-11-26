@@ -949,6 +949,7 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
     return () => clearInterval(id);
   }, [qrOpen, showQr, onRefresh]);
   const seq4 = String(p.seq).padStart(4, "0");
+  const closeReveal = () => { if (!preview) safeSet("local", REVEAL_KEY, String(p.seq)); setSeen(true); setRevealing(false); };
 
   const ranks = round && !r?.drawn ? ([1, 2, 3] as Rank[]).filter((k) => round.qty[k] > 0) : [];
   // 1~3등은 현장에 있는 사람만 받게 수령 기한을 짧게 둔다. 추첨 전에 미리 알려야 항의가 없다
@@ -1064,7 +1065,9 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
         <Reveal rank={expired ? null : r.rank} okLabel={h.revealOk}
           title={!r.rank ? h.lostTitle : expired ? fmt(h.wonBig, { rank: rankName(r.rank) }) : h.revealCongrats}
           line={!r.rank ? h.lostLine : expired ? h.expiredLine : `${rankName(r.rank)} · ${prizeOf(r.rank)}`}
-          onDone={() => { if (!preview) safeSet("local", REVEAL_KEY, String(p.seq)); setSeen(true); setRevealing(false); }} />
+          onDone={closeReveal}
+          // 당첨이고 아직 받을 수 있으면 결과 화면에서 바로 수령 QR 을 연다
+          qrLabel={h.qrButton} onQr={r.rank && !rankClaimed && !expired ? () => { closeReveal(); setQrOpen(true); } : undefined} />
       )}
 
       {noticeNew && !revealing && !qrOpen && (
