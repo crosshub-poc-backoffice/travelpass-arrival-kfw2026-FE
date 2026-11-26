@@ -190,6 +190,11 @@
 .offerLead { font-size: 17px; font-weight: 500; color: var(--muted); }
 .offerBig { margin: 8px 0 var(--s3); font-size: clamp(40px, 13vw, 56px); font-weight: 800; line-height: 1.15; letter-spacing: -0.03em; color: var(--yellow); word-break: keep-all; }
 .board .cta { margin-top: 0; }
+/* 설문 안내와 부스 방문 인증 안내는 서로 다른 층이라 72px 띄운다. 접히는 칸 안에 두어 설문이 접히면 간격도 같이 사라진다 */
+.offer { padding-bottom: 72px; }
+/* 부스 방문 인증: 설문 안내와 같은 크기. 제목·버튼을 흰색으로 해 노란 설문과 다른 일임을 보인다 */
+.boothBig { color: var(--fg); }
+.boothCheck { display: block; text-align: center; text-decoration: none; background: #fff; color: #111; }
 
 /* 입국 완료 홈. 전광판에 떠 있는 동안은 전광판 안내가 맨 위, 그 아래 추첨 안내(추첨번호 · 발표까지 남은 시간 · 경품).
    당첨되면 당첨 안내가 맨 위를 차지한다. 글은 모두 가운데 한 줄기 */
