@@ -47,6 +47,8 @@ export const CLAIM_MIN_MAX = 240;
 
 export const DRAW_QTY: Record<Rank, number> = { 1: 1, 2: 16, 3: 33 };
 
+/** 행사 공식 부스 방문 인증 페이지(이벤터스). 완료 화면의 설문 버튼 아래 버튼이 여기로 간다 */
+export const BOOTH_CHECK_URL = "https://solution.event-us.kr/attention/check/127411?returnurl=%2fs%2f127411%2f111923%2fbooth%2fLeZ7r5";
 /** 추가 질문(설문) 문항 수. 모두 답하면 당첨 확률 2배 */
 export const SURVEY_COUNT = 7;
 /** 등록 마감 = 추첨 이만큼 전. 그 사이는 등록 없이 설문만 마무리하는 시간 */

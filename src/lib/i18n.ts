@@ -131,6 +131,9 @@ const ko = {
     surveyUntil: "{time}까지",
     surveyOfferLead: "질문 7개만 답하면",
     surveyStart: "지금 답하기",
+    /** 행사 공식 부스 방문 인증(이벤터스)으로 가는 버튼 */
+    boothTitle: "부스 방문 인증",
+    boothCheck: "인증하기",
     qrFor: "받을 것: {items}",
   },
   results: {
@@ -361,6 +364,8 @@ const en: Messages = {
     surveyUntil: "Until {time}",
     surveyOfferLead: "Answer 7 quick questions for a",
     surveyStart: "Answer now",
+    boothTitle: "Booth check-in",
+    boothCheck: "Check in",
     qrFor: "To collect: {items}",
   },
   results: {
@@ -587,6 +592,8 @@ const zh: Messages = {
     surveyUntil: "截至 {time}",
     surveyOfferLead: "只需回答 7 个问题",
     surveyStart: "现在作答",
+    boothTitle: "展位到访认证",
+    boothCheck: "去认证",
     qrFor: "可领取：{items}",
   },
   results: {
@@ -813,6 +820,8 @@ const ja: Messages = {
     surveyUntil: "{time}まで",
     surveyOfferLead: "7つの質問に答えるだけで",
     surveyStart: "今すぐ答える",
+    boothTitle: "ブース訪問認証",
+    boothCheck: "認証する",
     qrFor: "受け取れるもの：{items}",
   },
   results: {

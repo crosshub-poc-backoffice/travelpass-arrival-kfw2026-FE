@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { NAME_MAX, SURVEY_COUNT, TZ, hhmm, type PrizeType, type Rank } from "@/lib/config";
+import { BOOTH_CHECK_URL, NAME_MAX, SURVEY_COUNT, TZ, hhmm, type PrizeType, type Rank } from "@/lib/config";
 import { FROM_WIDTH, ORIGIN_OTHER } from "@/lib/origins";
 import { filterName, nameLength, normalizeName, normalizeText, validateEmail, validateName } from "@/lib/validation";
 import { EMOJI_PALETTE, NAME_EMOJI_MAX, cells, emojiSrc, originFlag, paletteEmoji } from "@/lib/glyphs";
@@ -995,15 +995,20 @@ function Done({ me, onRefresh, onSurvey, preview }: { me: Me; onRefresh: () => v
       </div>
       {/* 맨 위 자리는 "당첨 확률 2배". 전광판은 현장에서 직원이 바로 안내하므로 화면에서 다시 말하지 않는다.
           다 답했거나 기한이 지나면 접히면서 사라진다 */}
-      <Fold shut={!svOpen}>
-        <div className={`${s.board} ${s.rise}`}>
-          <p className={s.offerLead}>{h.surveyOfferLead}</p>
-          <h1 className={s.offerBig}>{h.surveyApplied}</h1>
-          <button type="button" className={`btn ${s.cta}`} onClick={onSurvey}>
-            {svStarted > 0 ? fmt(h.surveyResume, { n: svStarted }) : h.surveyStart}
-          </button>
-        </div>
-      </Fold>
+      <div className={`${s.board} ${s.rise}`}>
+        <Fold shut={!svOpen}>
+          <div className={s.offer}>
+            <p className={s.offerLead}>{h.surveyOfferLead}</p>
+            <h1 className={s.offerBig}>{h.surveyApplied}</h1>
+            <button type="button" className={`btn ${s.cta}`} onClick={onSurvey}>
+              {svStarted > 0 ? fmt(h.surveyResume, { n: svStarted }) : h.surveyStart}
+            </button>
+          </div>
+        </Fold>
+        {/* 행사 공식 부스 방문 인증(이벤터스). 따로 QR 을 찍지 않아도 되게 설문 버튼 바로 아래에 둔다. 설문이 접혀도 남는다 */}
+        <h2 className={`${s.offerBig} ${s.boothBig}`}>{h.boothTitle}</h2>
+        <a href={BOOTH_CHECK_URL} className={`btn ${s.cta} ${s.boothCheck}`} target="_blank" rel="noopener">{h.boothCheck} ↗</a>
+      </div>
 
       {won && (
         // 당첨: 등수를 가장 크게 → 할 일 한 줄 → 경품·장소·기한을 항목으로 → QR 버튼
