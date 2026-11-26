@@ -10,6 +10,8 @@ export type BoardPin =
       kind: "winners"; round: string; drawn_at: string;
       /** 당첨자를 보여 주는 방식. 백엔드는 보내지 않고, 전광판이 추첨 연출 설정(lib/show)을 보고 채운다. 없거나 pages = 9명씩 페이지 넘김 */
       view?: "pages" | "summary";
+      /** 모아보기 1등 자리 아래 문구 (1등이 없을 때 이유 등). 이것도 전광판이 추첨 연출 설정에서 채운다 */
+      firstNote?: string;
       winners: { rank: Rank; seq: number; display_name: string; origin_code: string }[];
     }
   | { kind: "next"; at: string | null };

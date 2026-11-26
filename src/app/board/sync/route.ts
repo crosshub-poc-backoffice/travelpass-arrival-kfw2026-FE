@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/admin-auth";
-import { AD_SEC, SHOW_MIN, type DrawShow, type ShowState } from "@/lib/show";
+import { AD_SEC, BUILD, FIRST_NOTE_MAX, SHOW_MIN, type DrawShow, type ShowState } from "@/lib/show";
 
 /**
  * 추첨 연출 설정 저장소. 직원 화면(추첨 실행 창)이 적고 전광판이 읽는다.
@@ -37,7 +37,7 @@ async function write(show: DrawShow | null) {
   else mem.raw = raw || null;
 }
 
-const reply = (show: DrawShow | null) => NextResponse.json({ show, now: Date.now() } satisfies ShowState, { headers: { "Cache-Control": "no-store" } });
+const reply = (show: DrawShow | null) => NextResponse.json({ show, now: Date.now(), build: BUILD } satisfies ShowState, { headers: { "Cache-Control": "no-store" } });
 const fail = (status: number, error: string) => NextResponse.json({ error }, { status, headers: { "Cache-Control": "no-store" } });
 const clamp = (v: unknown, min: number, max: number, fallback: number) => (Number.isFinite(Number(v)) ? Math.min(max, Math.max(min, Math.round(Number(v)))) : fallback);
 
@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
       const src = typeof a?.src === "string" ? a.src : "";
       // 광고 주소는 같은 사이트 경로나 https 주소만 받는다
       const ad = src && (/^https:\/\//.test(src) || /^\/[^/]/.test(src)) ? { src, video: a?.video === true, sec: clamp(a?.sec, AD_SEC.min, AD_SEC.max, AD_SEC.initial) } : null;
-      const show: DrawShow = { startAt: Date.now(), ad, view: b.view === "pages" ? "pages" : "summary", showSec: clamp(b.showSec, SHOW_MIN.min * 60, SHOW_MIN.max * 60, SHOW_MIN.initial * 60) };
+      const firstNote = typeof b.firstNote === "string" ? b.firstNote.replace(/\s+/g, " ").trim().slice(0, FIRST_NOTE_MAX) : "";
+      const show: DrawShow = { startAt: Date.now(), ad, view: b.view === "pages" ? "pages" : "summary", showSec: clamp(b.showSec, SHOW_MIN.min * 60, SHOW_MIN.max * 60, SHOW_MIN.initial * 60), ...(firstNote ? { firstNote } : {}) };
       await write(show);
       return reply(show);
     }
