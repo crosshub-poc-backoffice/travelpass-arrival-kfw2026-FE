@@ -449,7 +449,7 @@ h2.sec { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
 /* 추첨 실행 창의 전광판 연출 설정 (ShowOptions): 추첨 전 광고 · 당첨자 화면 */
 .draw-show-row { margin-top: 24px; }
 .draw-show-line { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
-.draw-show-line .select { flex: 1; min-width: 0; }
+.draw-show-line .select, .draw-show-line .input { flex: 1; min-width: 0; }
 .draw-show-line .btn { white-space: nowrap; }
 .draw-show-hint { font-size: 13px; color: var(--muted); }
 .draw-show-seg { display: flex; flex: 1; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }

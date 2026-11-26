@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { api } from "./api";
-import { AD_MAX_BYTES, AD_SEC, BUILTIN_ADS, SHOW_MIN, type AdFile, type AdList } from "@/lib/show";
+import { AD_MAX_BYTES, AD_SEC, BUILTIN_ADS, FIRST_NOTE_MAX, SHOW_MIN, type AdFile, type AdList } from "@/lib/show";
 
 /** 추첨 실행 창에서 고르는 전광판 연출. 마지막에 쓴 값을 이 브라우저에 기억해 다음 회차의 기본값으로 쓴다 */
 export interface ShowChoice {
@@ -12,11 +12,13 @@ export interface ShowChoice {
   adSec: number;
   view: "summary" | "pages";
   showMin: number;
+  /** 1등을 0명으로 정한 회차에서 모아보기 1등 자리에 띄울 문구 */
+  firstNote: string;
 }
 
 const STORE = "tp_draw_show";
 export function loadChoice(): ShowChoice {
-  const base: ShowChoice = { ad: null, adSec: AD_SEC.initial, view: "summary", showMin: SHOW_MIN.initial };
+  const base: ShowChoice = { ad: null, adSec: AD_SEC.initial, view: "summary", showMin: SHOW_MIN.initial, firstNote: "" };
   try { return { ...base, ...(JSON.parse(localStorage.getItem(STORE) ?? "{}") as Partial<ShowChoice>) }; } catch { return base; }
 }
 export function saveChoice(c: ShowChoice) {
@@ -53,7 +55,7 @@ function Stepper({ value, unit, min, max, step, disabled, onChange }: { value: n
   );
 }
 
-export default function ShowOptions({ value, disabled, onChange }: { value: ShowChoice; disabled: boolean; onChange: (c: ShowChoice) => void }) {
+export default function ShowOptions({ value, disabled, noFirst, onChange }: { value: ShowChoice; disabled: boolean; /** 이번 회차 1등이 0명 */ noFirst: boolean; onChange: (c: ShowChoice) => void }) {
   const [ads, setAds] = useState<AdList | null>(null);
   const [upPct, setUpPct] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -141,6 +143,17 @@ export default function ShowOptions({ value, disabled, onChange }: { value: Show
           <span className="draw-show-hint">동안 전광판에 띄워요</span>
         </div>
       </div>
+
+      {noFirst && value.view === "summary" && (
+        <div className="draw-show-row">
+          <div className="draw-dlg-claim-k">1등 자리 문구</div>
+          <div className="draw-show-line">
+            <input className="input" type="text" maxLength={FIRST_NOTE_MAX} disabled={busy} value={value.firstNote}
+              placeholder="예: 1등 경품은 마지막 날 추첨해요" onChange={(e) => onChange({ ...value, firstNote: e.target.value })} />
+          </div>
+          <div className="draw-show-line"><span className="draw-show-hint">이번 회차는 1등이 없어요. 전광판 1등 자리 아래에 이 문구가 나와요</span></div>
+        </div>
+      )}
     </div>
   );
 }

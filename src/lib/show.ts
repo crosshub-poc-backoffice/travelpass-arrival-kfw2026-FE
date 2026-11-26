@@ -19,9 +19,14 @@ export interface DrawShow {
   view: "summary" | "pages";
   /** 당첨자 화면을 띄워 두는 시간(초) */
   showSec: number;
+  /** 모아보기 1등 자리에 띄울 문구. 1등을 0명으로 정한 회차에서 이유를 적어 둔다 */
+  firstNote?: string;
 }
 
-export interface ShowState { show: DrawShow | null; now: number }
+/** build = 지금 서버에 배포된 버전. 전광판이 자기 버전(BUILD)과 다르면 새로고침한다 */
+export interface ShowState { show: DrawShow | null; now: number; build?: string }
+/** 이 화면(또는 서버 코드)이 빌드된 배포 버전. 로컬 개발에서는 빈 값 */
+export const BUILD = process.env.NEXT_PUBLIC_BUILD ?? "";
 
 export interface AdFile { url: string; name: string; video: boolean; size: number }
 /**
@@ -36,6 +41,8 @@ export const BUILTIN_ADS: AdFile[] = [
 ];
 
 export const AD_SEC = { min: 5, max: 300, step: 5, initial: 15 };
+/** 1등 자리 문구 최대 글자 수 */
+export const FIRST_NOTE_MAX = 60;
 export const SHOW_MIN = { min: 1, max: 30, initial: 5 };
 /** 올릴 수 있는 광고 파일 크기 */
 export const AD_MAX_BYTES = 200 * 1024 * 1024;

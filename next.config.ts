@@ -31,6 +31,8 @@ const nextConfig = (backend: string): NextConfig => ({
   // 같은 와이파이의 폰에서 개발 서버(http://<맥 IP>:3000)로 열 때 JS·HMR 요청이 막히지 않게
   allowedDevOrigins: ["10.*.*.*", "192.168.*.*", "172.*.*.*"],
   poweredByHeader: false,
+  // 배포마다 달라지는 값. 열어 둔 전광판이 새 배포가 나온 걸 알아채고 스스로 새로고침하는 데 쓴다 (lib/show 의 BUILD)
+  env: { NEXT_PUBLIC_BUILD: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.VERCEL_DEPLOYMENT_ID ?? "" },
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${backend}/api/:path*` },

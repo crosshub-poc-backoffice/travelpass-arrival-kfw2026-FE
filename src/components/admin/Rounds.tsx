@@ -131,7 +131,7 @@ export default function Rounds() {
     saveChoice(show);
     setDrawing({ ...drawing, busy: true, err: null });
     try {
-      await api<ShowState>("/board/sync", { method: "POST", body: JSON.stringify({ action: "start", ad: show.ad ? { src: show.ad.url, video: show.ad.video, sec: show.adSec } : null, view: show.view, showSec: show.showMin * 60 }) });
+      await api<ShowState>("/board/sync", { method: "POST", body: JSON.stringify({ action: "start", ad: show.ad ? { src: show.ad.url, video: show.ad.video, sec: show.adSec } : null, view: show.view, showSec: show.showMin * 60, firstNote: drawing.r.qty_rank1 === 0 ? show.firstNote : "" }) });
     } catch (e) {
       // 한 번은 멈춰서 알린다 (광고 없이 발표되는 걸 모르고 지나가지 않게). 다시 누르면 연출 없이 추첨한다
       setDrawing((d) => d && { ...d, busy: false, plain: true, err: `전광판에 연출 설정을 보내지 못했어요. (${(e as Error).message}) 다시 누르면 광고 없이 기본 화면(9명씩 넘기기)으로 추첨해요.` });

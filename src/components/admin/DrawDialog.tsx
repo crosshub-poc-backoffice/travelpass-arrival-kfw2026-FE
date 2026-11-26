@@ -125,7 +125,7 @@ export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plann
           </div>
         )}
 
-        {preview && !empty && <ShowOptions value={show} disabled={busy} onChange={onShow} />}
+        {preview && !empty && <ShowOptions value={show} disabled={busy} noFirst={qty[0] === 0} onChange={onShow} />}
 
         {empty && (
           <p className="draw-dlg-note">
