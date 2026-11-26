@@ -98,6 +98,13 @@ export default function WinnersSummary({ pin, spinning, onTick }: Props) {
     <div className={`${s.wrap} ${spinning ? s.spinning : ""}`} style={{ ["--rh" as string]: `calc(${rh.toFixed(3)} * var(--u))`, ["--cols" as string]: cols, ["--ow" as string]: `calc(${originW.toFixed(3)} * var(--u))` }}>
       <div className={s.hero}>
         <div className={s.firsts}>
+          {/* 1등을 0명으로 정한 회차도 1등 자리는 남기고, 직원이 적은 문구(이유 등)를 이름 자리에 띄운다 */}
+          {first.length === 0 && (
+            <div className={s.first}>
+              <div className={s.firstLabel}><Glyphs text="🏆" /> 1ST PRIZE</div>
+              {pin.firstNote ? <div className={s.firstNote}>{pin.firstNote}</div> : null}
+            </div>
+          )}
           {first.map((w, i) => (
             <div key={i} className={s.first}>
               <div className={s.firstLabel}><Glyphs text="🏆" /> 1ST PRIZE</div>

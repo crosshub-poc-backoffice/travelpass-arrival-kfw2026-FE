@@ -10,7 +10,7 @@ import { BOARD_ROWS, EVENT_NAME, flightCode, hhmm } from "@/lib/config";
 import { FROM_WIDTH } from "@/lib/origins";
 import { cells, originFlag } from "@/lib/glyphs";
 import type { BoardPin } from "@/lib/api-types";
-import type { DrawShow, ShowState } from "@/lib/show";
+import { BUILD, BUILTIN_ADS, FIRST_NOTE_MAX, type AdFile, type AdList, type DrawShow, type ShowState } from "@/lib/show";
 import styles from "./board.module.css";
 
 interface Row { seq: number; display_name: string; origin_code: string; created_at: string }
@@ -105,6 +105,8 @@ export default function FlipBoard() {
   /** 추첨 연출 설정(광고 · 당첨자 화면 방식 · 표시 시간)과, 서버 시계 − 이 기기 시계 */
   const [show, setShow] = useState<DrawShow | null>(null);
   const [skew, setSkew] = useState(0);
+  /** 서버에 배포된 버전. 이 화면의 버전(BUILD)과 다르면 옛 화면이라 새로고침한다 */
+  const [liveBuild, setLiveBuild] = useState("");
   const [now, setNow] = useState(0);
   /** 서버가 마지막으로 내려 준 당첨자. 표시 시간을 서버 기본(5분)보다 길게 잡았으면 서버가 내린 뒤에도 이걸로 계속 띄운다 */
   const [held, setHeld] = useState<WinnersPin | null>(null);
@@ -115,13 +117,14 @@ export default function FlipBoard() {
   /** 이 추첨이 지금 연출 설정으로 실행된 것인지 (설정을 적은 뒤에 추첨됐으면 그렇다) */
   const linked = !!cand && !!show && candAt >= show.startAt - SHOW_SKEW_MS && candAt <= show.startAt + (show.ad?.sec ?? 0) * 1000 + SHOW_LINK_MS;
   const candView = linked ? show!.view : undefined;
+  const candNote = linked ? show!.firstNote : undefined;
   // 연출 설정이 있으면 그 표시 시간만큼, 없으면 서버가 내려 주는 동안만
   const candLive = !!cand && (linked ? now + skew < candAt + show!.showSec * 1000 : !!srvWinners);
   const livePin = useMemo<BoardPin | null>(() => {
-    if (cand && candLive) return { ...cand, view: candView };
+    if (cand && candLive) return { ...cand, view: candView, firstNote: candNote };
     // 표시 시간이 끝났는데 서버는 아직 당첨자를 내려 주는 동안: 다음 추첨 안내 줄로
     return srvWinners ? { kind: "next", at: null } : serverPin;
-  }, [cand, candLive, candView, srvWinners, serverPin]);
+  }, [cand, candLive, candView, candNote, srvWinners, serverPin]);
   /** 표시 시간이 끝나 내린 추첨. 서버가 아직 내려 주고 있어도 폴링이 판을 다시 당첨자 화면으로 잠그지 않게 */
   const expiredKey = useRef<string | null>(null);
   useEffect(() => { if (cand && !candLive && now) expiredKey.current = drawKey(cand); }, [cand, candLive, now]);
@@ -169,6 +172,9 @@ export default function FlipBoard() {
   /** ?test 당첨 발표 설정: 모아보기 여부와 떠 있는 시간(분) */
   const [testSummary, setTestSummary] = useState(true);
   const [testMin, setTestMin] = useState(1);
+  /** ?test 1등 인원과, 0명일 때 1등 자리 문구 */
+  const [testN1, setTestN1] = useState(1);
+  const [testNote, setTestNote] = useState("");
   /** ?test 추첨 전 광고: 고른 파일(이 브라우저 안에서만 쓰는 주소), 보여 줄 시간(초), 끝나는 시각(ms). 끝나면 가짜 추첨이 바로 이어진다 */
   const [testAd, setTestAd] = useState<{ src: string; video: boolean; name: string } | null>(null);
   const [testAdSec, setTestAdSec] = useState(15);
@@ -186,6 +192,30 @@ export default function FlipBoard() {
   const totalRef = useRef(0);
 
   useEffect(() => { setTestMode(new URLSearchParams(window.location.search).has("test")); }, []);
+
+  /**
+   * ?test 에서 고를 수 있는 실제 광고: 추첨 창에 나오는 것과 같은 목록.
+   * 목록은 운영 콘솔에 로그인한 브라우저만 받을 수 있어서, 못 받으면(전광판 TV 는 보통 로그인하지 않는다) 앱에 들어 있는 기본 광고만 보인다.
+   */
+  const [realAds, setRealAds] = useState<AdFile[]>([]);
+  const pickRealAd = useCallback((f: AdFile | undefined) => {
+    setTestAd((prev) => { if (prev?.src.startsWith("blob:")) URL.revokeObjectURL(prev.src); return f ? { src: f.url, video: f.video, name: f.name } : null; });
+    if (!f?.video) return;
+    // 영상은 추첨 창처럼 보여 줄 시간을 영상 길이에 맞춘다
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.onloadedmetadata = () => { if (Number.isFinite(v.duration)) setTestAdSec(Math.min(600, Math.max(3, Math.floor(v.duration)))); v.removeAttribute("src"); };
+    v.src = f.url;
+  }, []);
+  useEffect(() => {
+    if (!testMode) return;
+    let stop = false;
+    fetch("/board/ads", { cache: "no-store" })
+      .then((r) => (r.ok ? (r.json() as Promise<AdList>) : Promise.reject(new Error(String(r.status)))))
+      .then((d) => d.items, () => BUILTIN_ADS)
+      .then((items) => { if (stop) return; setRealAds(items); pickRealAd(items[0]); });
+    return () => { stop = true; };
+  }, [testMode, pickRealAd]);
 
   useEffect(() => {
     sound.current = new FlapSound();
@@ -331,6 +361,7 @@ export default function FlipBoard() {
           const s = (await r.json()) as ShowState;
           if (stop) return;
           setSkew(s.now - Date.now());
+          if (s.build) setLiveBuild(s.build);
           setShow((prev) => (JSON.stringify(prev) === JSON.stringify(s.show) ? prev : s.show));
         }
       } catch {}
@@ -351,11 +382,11 @@ export default function FlipBoard() {
   const testWinners = useCallback(() => {
     if (testPinTimer.current) clearTimeout(testPinTimer.current);
     if (testPinRef.current) { testPinRef.current = null; setTestPin(null); return; }
-    // 인원은 ?test=14,22 처럼 2등·3등 수를 적어 바꿀 수 있다 (기본 16·33)
+    // 2·3등 인원은 ?test=14,22 처럼 적어 바꿀 수 있다 (기본 16·33). 1등 인원과 문구는 패널에서 고른다
     const [n2, n3] = (new URLSearchParams(window.location.search).get("test") ?? "").split(",").map((x) => parseInt(x, 10));
-    const ranks = [...Array(1).fill(1), ...Array(n2 > 0 ? n2 : 16).fill(2), ...Array(n3 > 0 ? n3 : 33).fill(3)];
+    const ranks = [...Array(testN1).fill(1), ...Array(n2 > 0 ? n2 : 16).fill(2), ...Array(n3 > 0 ? n3 : 33).fill(3)];
     const fake: WinnersPin = {
-      kind: "winners", round: "TEST", drawn_at: new Date().toISOString(), view: testSummary ? "summary" : "pages",
+      kind: "winners", round: "TEST", drawn_at: new Date().toISOString(), view: testSummary ? "summary" : "pages", firstNote: testN1 === 0 ? testNote.trim() || undefined : undefined,
       winners: ranks.map((rank) => ({ rank, seq: 1 + Math.floor(Math.random() * 999), display_name: pick(TEST_NAMES), origin_code: pick(TEST_ORIGINS) })),
     };
     winnersOn.current = true;
@@ -363,7 +394,7 @@ export default function FlipBoard() {
     setTestPin(fake);
     // 뜸 들이는 시간은 표시 시간에 넣지 않는다
     testPinTimer.current = window.setTimeout(() => { testPinRef.current = null; setTestPin(null); }, testSpinSec * 1000 + testMin * 60000);
-  }, [testSummary, testMin, testSpinSec]);
+  }, [testSummary, testMin, testSpinSec, testN1, testNote]);
   useEffect(() => () => { if (testPinTimer.current) clearTimeout(testPinTimer.current); }, []);
 
   /**
@@ -376,6 +407,18 @@ export default function FlipBoard() {
   const adFrom = testAdAt || !show ? 0 : show.startAt - skew;
   const ad = testAdAt ? testAd : show?.ad ?? null;
   const adOn = !winners && adAt !== null && now >= adFrom && now <= adAt + AD_HOLD_MS;
+  /**
+   * 새 배포가 나왔는데 전광판이 옛 화면을 그대로 열어 두고 있으면 새 기능(광고 · 모아보기)이 통째로 안 나온다.
+   * 그래서 버전이 달라지면 스스로 새로고침한다. 당첨자 화면이나 광고 중에는 끝날 때까지 미루고, 같은 버전으로는 한 번만 한다 (새로고침이 되풀이되지 않게).
+   */
+  useEffect(() => {
+    if (!BUILD || !liveBuild || liveBuild === BUILD || winners || adOn) return;
+    try {
+      if (sessionStorage.getItem("tp_board_reload") === liveBuild) return;
+      sessionStorage.setItem("tp_board_reload", liveBuild);
+    } catch { return; }
+    window.location.reload();
+  }, [liveBuild, winners, adOn]);
   // 광고가 덮고 있는 동안 아래 판이 넘어가는 소리는 내지 않는다
   useEffect(() => {
     const snd = sound.current;
@@ -504,12 +547,21 @@ export default function FlipBoard() {
           <button type="button" onClick={testReplay}>전체 다시 넘기기</button>
           <button type="button" onClick={testWinners}>{testPin ? "당첨 발표 끄기" : "당첨 발표"}</button>
           <button type="button" disabled={!!testPin} onClick={() => setTestAdAt((v) => (v ? null : Date.now() + testAdSec * 1000))}>{testAdAt ? "광고 끄기" : "추첨 전 광고"}</button>
+          {realAds.length > 0 && (
+            <label>
+              실제 광고
+              <select value={realAds.some((f) => f.url === testAd?.src) ? testAd!.src : ""} disabled={!!testAdAt} onChange={(e) => pickRealAd(realAds.find((f) => f.url === e.target.value))}>
+                <option value="">{testAd?.src.startsWith("blob:") ? "내 파일" : "없음"}</option>
+                {realAds.map((f) => <option key={f.url} value={f.url}>{f.video ? "영상" : "사진"} · {f.name}</option>)}
+              </select>
+            </label>
+          )}
           <label>
-            {testAd ? testAd.name : "광고 파일"}
+            {testAd?.src.startsWith("blob:") ? testAd.name : "내 파일"}
             <input type="file" accept="image/*,video/*" hidden disabled={!!testAdAt} onChange={(e) => {
               const f = e.target.files?.[0];
               if (!f) return;
-              setTestAd((prev) => { if (prev) URL.revokeObjectURL(prev.src); return { src: URL.createObjectURL(f), video: f.type.startsWith("video/"), name: f.name.length > 14 ? `${f.name.slice(0, 12)}…` : f.name }; });
+              setTestAd((prev) => { if (prev?.src.startsWith("blob:")) URL.revokeObjectURL(prev.src); return { src: URL.createObjectURL(f), video: f.type.startsWith("video/"), name: f.name.length > 14 ? `${f.name.slice(0, 12)}…` : f.name }; });
             }} />
           </label>
           <label>
@@ -518,6 +570,17 @@ export default function FlipBoard() {
           <label>
             뜸<input type="number" min={1} max={30} step={0.5} value={testSpinSec} disabled={!!testPin} onChange={(e) => setTestSpinSec(Math.min(30, Math.max(1, Number(e.target.value) || 1)))} />초
           </label>
+          <label>
+            1등
+            <select value={testN1} disabled={!!testPin} onChange={(e) => setTestN1(Number(e.target.value))}>
+              {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}명</option>)}
+            </select>
+          </label>
+          {testN1 === 0 && (
+            <label>
+              <input className={styles.testNote} type="text" maxLength={FIRST_NOTE_MAX} placeholder="1등 자리 문구" value={testNote} disabled={!!testPin} onChange={(e) => setTestNote(e.target.value)} />
+            </label>
+          )}
           <label><input type="checkbox" checked={testSummary} disabled={!!testPin} onChange={(e) => setTestSummary(e.target.checked)} />모아보기</label>
           <label>
             표시 시간
