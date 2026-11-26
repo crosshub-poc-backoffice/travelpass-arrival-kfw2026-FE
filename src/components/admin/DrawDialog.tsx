@@ -19,6 +19,9 @@ interface Props {
   /** 이번 추첨에 쓸 수령 시간(분). 안내한 시간에서 5분 단위로 늘리기만 한다 */
   claimMin: string;
   onClaimMin: (v: string) => void;
+  /** 등수별 지정 당첨 번호 입력값 (쉼표·공백으로 구분). 빈 칸이면 그 등수는 전부 무작위 */
+  fixed: [string, string, string];
+  onFixed: (rankIdx: 0 | 1 | 2, v: string) => void;
   /** 전광판 연출: 추첨 전 광고 · 당첨자 화면 방식 · 표시 시간 */
   show: ShowChoice;
   onShow: (c: ShowChoice) => void;
@@ -40,7 +43,7 @@ interface Props {
  * 추첨 실행 확인. 누른 순간 받아 온 대상 인원을 크게 보여 주고, 실행·오류까지 이 창 안에서 끝낸다.
  * 네이티브 <dialog> 라 Esc·포커스 가두기를 브라우저가 해 준다. 실행 중에는 닫히지 않는다.
  */
-export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plannedMin, claimMin, onClaimMin, show, onShow, plain, adUntil, onDrawNow, onCancelAd, busy, error, onConfirm, onClose }: Props) {
+export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plannedMin, claimMin, onClaimMin, fixed, onFixed, show, onShow, plain, adUntil, onDrawNow, onCancelAd, busy, error, onConfirm, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -54,7 +57,6 @@ export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plann
     return () => d.close();
   }, []);
 
-  const before = new Date(cutoffAt).getTime() > Date.now();
   const early = new Date(drawAt).getTime() > Date.now();
   const empty = preview?.n === 0;
   const close = () => { if (!busy && adUntil === null) onClose(); };
@@ -109,6 +111,20 @@ export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plann
           </div>
         )}
 
+        {!empty && (
+          <div className="draw-dlg-claim">
+            <div className="draw-dlg-claim-k">당첨 번호 지정 (선택)</div>
+            {([0, 1, 2] as const).map((i) => (
+              <label key={i} className="draw-dlg-fixed">
+                <span>{i + 1}등</span>
+                <input type="text" inputMode="numeric" placeholder={`번호 최대 ${qty[i]}개, 쉼표로 구분`}
+                  value={fixed[i]} disabled={busy} onChange={(e) => onFixed(i, e.target.value)} />
+              </label>
+            ))}
+            <p className="draw-dlg-sub">참여번호를 넣어요 (12 · 0012 · TP 0012 모두 같아요). 비워 둔 자리는 무작위로 뽑아요.</p>
+          </div>
+        )}
+
         {preview && !empty && <ShowOptions value={show} disabled={busy} noFirst={qty[0] === 0} onChange={onShow} />}
 
         {empty && (
@@ -116,22 +132,10 @@ export default function DrawDialog({ name, cutoffAt, drawAt, qty, preview, plann
             아직 추첨 대상이 없어요. 직전 회차 마감 이후부터 이 회차 마감({fmtDateTime(cutoffAt)}) 전까지 등록한 사람이 대상이에요.
           </p>
         )}
-        {preview && !empty && before && (
-          <p className="draw-dlg-note warn">
-            마감({fmtDateTime(cutoffAt)}) 전이에요. 지금까지 등록한 {preview.n.toLocaleString()}명으로 확정되고,{" "}
-            {preview.last ? "이후 등록자는 남은 회차가 없어 추첨에서 빠져요." : "이후 등록자는 다음 회차 대상이 돼요."}
-          </p>
-        )}
-        {preview && !empty && early && (
-          <p className="draw-dlg-note warn">
-            추첨 시각({fmtDateTime(drawAt)}) 전이에요. 지금 추가 질문에 답하고 있는 사람은 당첨 확률 2배를 받지 못해요.
-          </p>
-        )}
         {error && <p className="draw-dlg-note err" role="alert">{error}</p>}
       </div>
 
       <div className="draw-dlg-foot">
-        {!empty && <span className="draw-dlg-final">실행 후에는 결과를 바꿀 수 없어요</span>}
         <div className="draw-dlg-btns">
           <button className="btn ghost sm" type="button" onClick={close} disabled={busy}>{empty ? "닫기" : "취소"}</button>
           {!empty && (
