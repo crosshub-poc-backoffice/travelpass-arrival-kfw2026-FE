@@ -432,6 +432,12 @@ h2.sec { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
 .tp-links-quiet a { padding: 8px 0; font-size: 13px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 .draw-dlg-claim { margin-top: 24px; }
 .draw-dlg-claim-k { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.draw-dlg-fixed { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.draw-dlg-fixed span { width: 32px; font-size: 13px; font-weight: 600; }
+.draw-dlg-fixed input { flex: 1; min-width: 0; padding: 9px 12px; font-size: 15px; font-family: var(--mono); letter-spacing: 0.04em; color: var(--fg); caret-color: var(--yellow); background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; outline: none; }
+.draw-dlg-fixed input::placeholder { color: var(--muted); font-family: inherit; letter-spacing: 0; }
+.draw-dlg-fixed input:focus { border-color: var(--yellow); }
+.draw-dlg-fixed input:disabled { opacity: 0.5; }
 .draw-dlg-claim-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .draw-dlg-step { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 10px; }
 .draw-dlg-step button { width: 36px; height: 36px; border: 0; background: transparent; color: var(--fg); font-size: 18px; cursor: pointer; }

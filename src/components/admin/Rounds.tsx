@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { DRAW_QTY, EVENT_DAYS, TZ, fmtDateTime, plannedClaimMin, scheduleRounds, type Rank } from "@/lib/config";
+import { DRAW_QTY, EVENT_DAYS, FLIGHT_PREFIX, TZ, fmtDateTime, plannedClaimMin, scheduleRounds, type Rank } from "@/lib/config";
 import StockEditor from "./StockEditor";
 import NoticeEditor from "./NoticeEditor";
 import InfoTip from "./InfoTip";
@@ -78,15 +78,25 @@ export default function Rounds() {
   }
 
   /** 추첨 확인 창: 누른 순간 대상을 새로 받아 보여 주고, 실행·오류도 창 안에서 처리 */
-  const [drawing, setDrawing] = useState<{ r: Round; pv: Preview | null; busy: boolean; err: string | null; claimMin: string; show: ShowChoice; adUntil: number | null; plain?: boolean } | null>(null);
+  const [drawing, setDrawing] = useState<{ r: Round; pv: Preview | null; busy: boolean; err: string | null; claimMin: string; fixed: [string, string, string]; show: ShowChoice; adUntil: number | null; plain?: boolean } | null>(null);
   async function draw(r: Round) {
     const planned = plannedClaimMin(r);
-    setDrawing({ r, pv: null, busy: false, err: null, claimMin: planned === null ? "" : String(planned), show: loadChoice(), adUntil: null });
+    setDrawing({ r, pv: null, busy: false, err: null, claimMin: planned === null ? "" : String(planned), fixed: ["", "", ""], show: loadChoice(), adUntil: null });
     try {
       const pv = await api<Preview>(`/api/admin/rounds/${r.id}/preview`);
       setPreview((p) => ({ ...p, [r.id]: pv }));
       setDrawing((d) => d && d.r.id === r.id ? { ...d, pv } : d);
     } catch (e) { setDrawing((d) => d && { ...d, err: (e as Error).message }); }
+  }
+  /** 지정 당첨 번호 입력값 → { "1": [12], ... }. "TP 0012" 도 12 로. 숫자가 아닌 게 섞이면 오류 문구 */
+  function parseFixed(input: [string, string, string]): { fixed: Record<string, number[]> | null; error: string | null } {
+    const fixed: Record<string, number[]> = {};
+    for (const i of [0, 1, 2] as const) {
+      const toks = input[i].replace(new RegExp(FLIGHT_PREFIX, "gi"), " ").split(/[\s,]+/).filter(Boolean);
+      if (toks.some((t) => !/^\d+$/.test(t))) return { fixed: null, error: `${i + 1}등 지정 번호는 숫자만 넣어 주세요.` };
+      if (toks.length) fixed[i + 1] = toks.map(Number);
+    }
+    return { fixed: Object.keys(fixed).length ? fixed : null, error: null };
   }
   /** 실제 추첨. 광고가 끝났을 때·"지금 바로 추첨"·광고 없는 추첨이 모두 여기로 온다. 한 번만 실행되게 막는다 */
   const drawSent = useRef(false);
@@ -94,9 +104,10 @@ export default function Rounds() {
     if (!drawing || drawSent.current) return;
     drawSent.current = true;
     const { r, claimMin } = drawing;
+    const { fixed } = parseFixed(drawing.fixed);
     setDrawing((d) => d && { ...d, busy: true, err: null });
     try {
-      await api(`/api/admin/rounds/${r.id}/draw`, { method: "POST", body: JSON.stringify({ force: new Date(r.announce_at ?? r.cutoff_at).getTime() > Date.now(), claimMin: claimMin === "" ? null : Number(claimMin) }) });
+      await api(`/api/admin/rounds/${r.id}/draw`, { method: "POST", body: JSON.stringify({ force: new Date(r.announce_at ?? r.cutoff_at).getTime() > Date.now(), claimMin: claimMin === "" ? null : Number(claimMin), ...(fixed ? { fixed } : {}) }) });
       setDrawing(null);
       load();
     } catch (e) {
@@ -111,6 +122,9 @@ export default function Rounds() {
    */
   async function confirmDraw() {
     if (!drawing || drawing.busy) return;
+    // 지정 번호 형식은 광고를 틀기 전에 본다 (광고가 끝난 뒤에 막히지 않게)
+    const fe = parseFixed(drawing.fixed).error;
+    if (fe) { setDrawing({ ...drawing, err: fe }); return; }
     const { show, plain } = drawing;
     // 연출 설정을 못 보낸 뒤 다시 누른 경우: 연출 없이 기본 화면으로 바로 추첨한다. 연출 때문에 추첨이 막히면 안 된다
     if (plain) { await runDraw(); return; }
@@ -259,6 +273,7 @@ export default function Rounds() {
       {drawing && (
         <DrawDialog name={drawing.r.name} cutoffAt={drawing.r.cutoff_at} drawAt={drawing.r.announce_at ?? drawing.r.cutoff_at} qty={[drawing.r.qty_rank1, drawing.r.qty_rank2, drawing.r.qty_rank3]}
           preview={drawing.pv} plannedMin={plannedClaimMin(drawing.r)} claimMin={drawing.claimMin} onClaimMin={(v) => setDrawing((d) => d && { ...d, claimMin: v })}
+          fixed={drawing.fixed} onFixed={(i, v) => setDrawing((d) => { if (!d) return d; const f = [...d.fixed] as [string, string, string]; f[i] = v; return { ...d, fixed: f }; })}
           show={drawing.show} onShow={(c) => setDrawing((d) => d && { ...d, show: c, plain: false })} plain={!!drawing.plain} adUntil={drawing.adUntil} onDrawNow={drawNow} onCancelAd={cancelAd} busy={drawing.busy} error={drawing.err} onConfirm={confirmDraw} onClose={() => setDrawing(null)} />
       )}
     </>
