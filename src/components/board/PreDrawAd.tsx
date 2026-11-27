@@ -12,6 +12,8 @@ interface Props {
   sound: boolean;
   /** 광고가 끝나기까지 남은 시간(ms). 0 이하면 정해 둔 시간이 다 돼 광고를 내리고 추첨을 기다리는 중 */
   left: number;
+  /** 추첨 없이 광고만 트는 경우: "추첨까지" 남은 시간 표시를 숨긴다 */
+  adOnly?: boolean;
 }
 
 /**
@@ -19,7 +21,7 @@ interface Props {
  * 구석에 추첨까지 남은 시간을 띄운다. 이미지는 정해 둔 시간만큼 보여 주고, 영상은 그 시간이 되면 끝까지 안 갔어도 자른다.
  * 시간이 다 되면 광고를 내리고, 추첨 결과가 오는 대로 바로 이름을 돌린다.
  */
-export default function PreDrawAd({ src, video, sound, left }: Props) {
+export default function PreDrawAd({ src, video, sound, left, adOnly }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
   const sec = Math.max(0, Math.ceil(left / 1000));
   const playing = video && !!src && sec > 0;
@@ -49,10 +51,10 @@ export default function PreDrawAd({ src, video, sound, left }: Props) {
         // eslint-disable-next-line @next/next/no-img-element
         <img className={s.media} src={src} alt="" />
       )}
-      <div className={s.badge}>
+      {!adOnly && <div className={s.badge}>
         <span className={s.badgeLabel}>LUCKY DRAW · 추첨까지</span>
         <span className={s.badgeTime}>{mmss}</span>
-      </div>
+      </div>}
     </div>
   );
 }

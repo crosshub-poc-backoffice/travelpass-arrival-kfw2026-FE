@@ -10,7 +10,7 @@ import { BOARD_ROWS, EVENT_NAME, flightCode, hhmm } from "@/lib/config";
 import { FROM_WIDTH } from "@/lib/origins";
 import { cells, originFlag } from "@/lib/glyphs";
 import type { BoardPin } from "@/lib/api-types";
-import { BUILD, BUILTIN_ADS, FIRST_NOTE_MAX, type AdFile, type AdList, type DrawShow, type ShowState } from "@/lib/show";
+import { BUILD, BUILTIN_ADS, FANFARE_FRESH_MS, FIRST_NOTE_MAX, type AdFile, type AdList, type DrawShow, type ShowState } from "@/lib/show";
 import styles from "./board.module.css";
 
 interface Row { seq: number; display_name: string; origin_code: string; created_at: string }
@@ -51,11 +51,11 @@ const SHOW_LINK_MS = 3 * 60 * 1000;
 const SHOW_POLL_MS = 3000;
 const RANK_LABEL: Record<number, string> = { 1: "🏆 1ST", 2: "2ND", 3: "3RD" };
 /** 추첨 직후 당첨자를 띄우기 전에 이름을 돌리며 뜸을 들이는 시간 */
-const DRAW_SPIN_MS = 7000;
+export const DRAW_SPIN_MS = 7000;
 /** 그동안 줄을 새 이름으로 다시 돌리는 간격. 한 줄이 끝 칸까지 넘어가기 시작하는 시간보다 길어야 끝 칸도 돈다 */
 const SPIN_STEP_MS = 680;
 /** 뜸 들이는 동안 플랩 소리 크기 (평소의 몇 배) */
-const SPIN_VOLUME = 0.3;
+export const SPIN_VOLUME = 0.3;
 
 type WinnersPin = Extract<BoardPin, { kind: "winners" }>;
 
@@ -115,7 +115,7 @@ export default function FlipBoard() {
   const cand = srvWinners ?? held;
   const candAt = cand ? new Date(cand.drawn_at).getTime() : 0;
   /** 이 추첨이 지금 연출 설정으로 실행된 것인지 (설정을 적은 뒤에 추첨됐으면 그렇다) */
-  const linked = !!cand && !!show && candAt >= show.startAt - SHOW_SKEW_MS && candAt <= show.startAt + (show.ad?.sec ?? 0) * 1000 + SHOW_LINK_MS;
+  const linked = !!cand && !!show && !show.adOnly && candAt >= show.startAt - SHOW_SKEW_MS && candAt <= show.startAt + (show.ad?.sec ?? 0) * 1000 + SHOW_LINK_MS;
   const candView = linked ? show!.view : undefined;
   const candNote = linked ? show!.firstNote : undefined;
   // 연출 설정이 있으면 그 표시 시간만큼, 없으면 서버가 내려 주는 동안만
@@ -350,6 +350,8 @@ export default function FlipBoard() {
     return () => { stop = true; };
   }, [apply]);
 
+  /** 운영 콘솔에서 누른 빵빠레 요청 중 이미 처리한 것. 화면을 열 때 남아 있던 요청은 울리지 않는다 */
+  const fanfareSeen = useRef<number | null | undefined>(undefined);
   // 추첨 연출 설정. 못 읽어도 전광판은 그대로 돈다 (그때는 마지막으로 읽은 값, 없으면 광고 없이 기본 화면으로 발표)
   useEffect(() => {
     let stop = false;
@@ -362,6 +364,16 @@ export default function FlipBoard() {
           if (stop) return;
           setSkew(s.now - Date.now());
           if (s.build) setLiveBuild(s.build);
+          // 빵빠레 테스트: 당첨 순간과 똑같이 꽃가루 + 효과음 (소리는 전광판 소리가 켜져 있을 때만)
+          const fx = s.fanfareAt ?? null;
+          if (fanfareSeen.current === undefined) fanfareSeen.current = fx;
+          else if (fx !== null && fx !== fanfareSeen.current) {
+            fanfareSeen.current = fx;
+            if (s.now - fx < FANFARE_FRESH_MS) {
+              setBurst((n) => n + 1);
+              if (sound.current?.enabled) fanfare(audio.current);
+            }
+          }
           setShow((prev) => (JSON.stringify(prev) === JSON.stringify(s.show) ? prev : s.show));
         }
       } catch {}
@@ -406,7 +418,12 @@ export default function FlipBoard() {
   const adAt = testAdAt ?? realAdAt;
   const adFrom = testAdAt || !show ? 0 : show.startAt - skew;
   const ad = testAdAt ? testAd : show?.ad ?? null;
-  const adOn = !winners && adAt !== null && now >= adFrom && now <= adAt + AD_HOLD_MS;
+  /**
+   * 광고만 튼 경우(영상 탭)는 추첨이 이어지지 않으니 "곧 시작합니다"로 붙잡지 않는다.
+   * 또 직원이 버튼으로 직접 튼 것이라 당첨자 화면이 떠 있어도 그 위에 띄운다 (광고가 끝나면 당첨자 화면이 다시 보인다)
+   */
+  const adOnly = !testAdAt && !!show?.adOnly;
+  const adOn = (adOnly || !winners) && adAt !== null && now >= adFrom && now <= adAt + (adOnly ? 0 : AD_HOLD_MS);
   /**
    * 새 배포가 나왔는데 전광판이 옛 화면을 그대로 열어 두고 있으면 새 기능(광고 · 모아보기)이 통째로 안 나온다.
    * 그래서 버전이 달라지면 스스로 새로고침한다. 당첨자 화면이나 광고 중에는 끝날 때까지 미루고, 같은 버전으로는 한 번만 한다 (새로고침이 되풀이되지 않게).
@@ -537,8 +554,8 @@ export default function FlipBoard() {
             <img className={styles.logo} src="/brand/travelpass-dark.svg" alt="Travel Pass" />
           </div>
         </footer>
-        {adOn && adAt !== null && <PreDrawAd src={ad?.src ?? ""} video={!!ad?.video} sound={soundOn} left={adAt - now} />}
-        {summary && winners && <WinnersSummary pin={winners} spinning={spinning} onTick={() => sound.current?.tick()} />}
+        {adOn && adAt !== null && <PreDrawAd src={ad?.src ?? ""} video={!!ad?.video} sound={soundOn} left={adAt - now} adOnly={adOnly} />}
+        {summary && winners && !adOn && <WinnersSummary pin={winners} spinning={spinning} onTick={() => sound.current?.tick()} />}
       </div>
 
       {testMode && (
