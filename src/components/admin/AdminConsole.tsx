@@ -8,8 +8,9 @@ import Claims from "./Claims";
 import Stats from "./Stats";
 import Logs from "./Logs";
 import LiveBar from "./LiveBar";
+import AdPlayer from "./AdPlayer";
 
-type Tab = "participants" | "rounds" | "claims" | "stats" | "logs";
+type Tab = "participants" | "rounds" | "claims" | "stats" | "logs" | "video";
 
 export default function AdminConsole() {
   const [loggedIn, setLoggedIn] = useState<boolean | undefined>(undefined);
@@ -67,6 +68,7 @@ export default function AdminConsole() {
         <button className={tab === "rounds" ? "on" : ""} onClick={() => setTab("rounds")}>추첨·설정</button>
         <button className={tab === "stats" ? "on" : ""} onClick={() => setTab("stats")}>통계</button>
         <button className={tab === "logs" ? "on" : ""} onClick={() => setTab("logs")}>로그</button>
+        <button className={tab === "video" ? "on" : ""} onClick={() => setTab("video")}>영상</button>
         <div className="tabs-side">
           {/* TV·발표 화면은 노트북에서 띄우는 것이라 폰에서는 숨긴다 */}
           <a className="btn ghost sm wide-only" href="/board" target="_blank" style={{ textDecoration: "none" }}>TV 보드 ↗</a>
@@ -80,6 +82,7 @@ export default function AdminConsole() {
       {tab === "rounds" && <Rounds />}
       {tab === "stats" && <Stats />}
       {tab === "logs" && <Logs />}
+      {tab === "video" && <AdPlayer />}
     </div>
   );
 }

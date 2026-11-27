@@ -21,10 +21,15 @@ export interface DrawShow {
   showSec: number;
   /** 모아보기 1등 자리에 띄울 문구. 1등을 0명으로 정한 회차에서 이유를 적어 둔다 */
   firstNote?: string;
+  /** 추첨 없이 광고만 전광판에 트는 경우 (운영 콘솔 영상 탭). 광고가 끝나면 "곧 시작합니다" 없이 바로 내리고, 당첨 발표와 엮지 않는다 */
+  adOnly?: boolean;
 }
 
 /** build = 지금 서버에 배포된 버전. 전광판이 자기 버전(BUILD)과 다르면 새로고침한다 */
-export interface ShowState { show: DrawShow | null; now: number; build?: string }
+/** fanfareAt = 운영 콘솔 영상 탭에서 "전광판 빵빠레"를 누른 시각 (서버 시계, ms). 전광판이 값이 바뀐 걸 보면 당첨 순간처럼 효과음·꽃가루를 낸다 */
+export interface ShowState { show: DrawShow | null; now: number; build?: string; fanfareAt?: number | null }
+/** 빵빠레 요청이 이보다 오래됐으면 전광판이 무시한다 (폴링 간격 3초 + 여유) */
+export const FANFARE_FRESH_MS = 10 * 1000;
 /** 이 화면(또는 서버 코드)이 빌드된 배포 버전. 로컬 개발에서는 빈 값 */
 export const BUILD = process.env.NEXT_PUBLIC_BUILD ?? "";
 
